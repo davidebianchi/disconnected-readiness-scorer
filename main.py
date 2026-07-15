@@ -434,7 +434,14 @@ def print_summary(score, results, log_file=None):
 
 
 def render_json(
-    score, results, repo_name, verbose=False, exceptions=None, exception_hits=None, today=None
+    score,
+    results,
+    repo_name,
+    verbose=False,
+    exceptions=None,
+    exception_hits=None,
+    today=None,
+    git_sha=None,
 ):
     snippets = _build_exception_snippets(results)
     rules_data = []
@@ -466,6 +473,8 @@ def render_json(
         "score": score,
         "rules": rules_data,
     }
+    if git_sha:
+        data["git_sha"] = git_sha
     if exceptions and exception_hits:
         data["exceptions"] = [
             {
@@ -812,6 +821,18 @@ def _get_repo_name(repo_root):
     return os.path.basename(repo_root)
 
 
+def _get_git_head_sha(repo_root):
+    """Return the HEAD commit SHA, or None if not a git repo."""
+    try:
+        return subprocess.check_output(
+            ["git", "-C", repo_root, "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except (subprocess.CalledProcessError, OSError):
+        return None
+
+
 def _load_all_exceptions(args):
     """Load exceptions from central config.
 
@@ -1055,11 +1076,15 @@ def _run(
             f"Provide one -o per --report format, in the same order."
         )
 
+    git_sha = _get_git_head_sha(repo_root)
+
     exc_args = {"exceptions": exceptions, "exception_hits": exception_hits, "today": today}
 
     for i, fmt in enumerate(formats):
         if fmt == "json":
-            report = render_json(score, results, repo_name, verbose=verbose, **exc_args)
+            report = render_json(
+                score, results, repo_name, verbose=verbose, git_sha=git_sha, **exc_args
+            )
         else:
             report = render_markdown(score, results, repo_name, **exc_args)
 
