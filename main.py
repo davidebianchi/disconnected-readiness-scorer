@@ -828,6 +828,7 @@ def _get_git_head_sha(repo_root):
             ["git", "-C", repo_root, "rev-parse", "HEAD"],
             stderr=subprocess.DEVNULL,
             text=True,
+            timeout=15,
         ).strip()
     except (subprocess.CalledProcessError, OSError):
         return None
