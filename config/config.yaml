@@ -404,7 +404,8 @@ exceptions:
       - "sdk/python/feast/api/registry/rest/rest_registry_server.py"
       - "sdk/python/feast/infra/mcp_servers/mcp_server.py"
       - "sdk/python/feast/infra/offline_stores/offline_store.py"
-    reason: "String literals in ImportError/warning messages guiding users to install optional dependencies — no actual runtime pip subprocess invocations"
+      - "sdk/python/feast/infra/online_stores/scylladb_online_store/scylladb.py"
+    reason: "String literals in ImportError/warning messages or docstrings guiding users to install optional dependencies — no actual runtime pip subprocess invocations"
     reference: "https://issues.redhat.com/browse/RHOAIENG-69995"
 
   - rules: no-runtime-egress
