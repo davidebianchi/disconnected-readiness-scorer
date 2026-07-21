@@ -2368,6 +2368,7 @@ class TestRuleRegistryMetadata:
 
 # --- audit exceptions ---
 
+
 class TestAuditExceptions:
     def test_repo_specific_wildcard_is_warning(self):
         exceptions = [
@@ -2376,7 +2377,7 @@ class TestAuditExceptions:
         findings = _audit_exceptions(exceptions)
         warnings = [f for f in findings if f["level"] == "warning"]
         assert len(warnings) >= 1
-        assert "rules: \"*\"" in warnings[0]["reason"]
+        assert 'rules: "*"' in warnings[0]["reason"]
 
     def test_universal_wildcard_is_info(self):
         exceptions = [
@@ -2398,8 +2399,12 @@ class TestAuditExceptions:
 
     def test_repo_specific_narrow_paths_only_no_warning(self):
         exceptions = [
-            {"rules": "no-image-tags", "repo": "my-repo",
-             "paths": ["pkg/constants/constants.go"], "reason": "specific file"},
+            {
+                "rules": "no-image-tags",
+                "repo": "my-repo",
+                "paths": ["pkg/constants/constants.go"],
+                "reason": "specific file",
+            },
         ]
         findings = _audit_exceptions(exceptions)
         warnings = [f for f in findings if f["level"] == "warning"]
@@ -2407,8 +2412,13 @@ class TestAuditExceptions:
 
     def test_repo_specific_with_message_no_warning(self):
         exceptions = [
-            {"rules": "no-image-tags", "repo": "my-repo", "paths": ["src/**"],
-             "message": "*specific*", "reason": "test"},
+            {
+                "rules": "no-image-tags",
+                "repo": "my-repo",
+                "paths": ["src/**"],
+                "message": "*specific*",
+                "reason": "test",
+            },
         ]
         findings = _audit_exceptions(exceptions)
         warnings = [f for f in findings if f["level"] == "warning"]
@@ -2416,8 +2426,13 @@ class TestAuditExceptions:
 
     def test_repo_specific_with_images_no_warning(self):
         exceptions = [
-            {"rules": "no-image-tags", "repo": "my-repo", "paths": ["src/**"],
-             "images": ["quay.io/*"], "reason": "test"},
+            {
+                "rules": "no-image-tags",
+                "repo": "my-repo",
+                "paths": ["src/**"],
+                "images": ["quay.io/*"],
+                "reason": "test",
+            },
         ]
         findings = _audit_exceptions(exceptions)
         warnings = [f for f in findings if f["level"] == "warning"]
@@ -2425,8 +2440,13 @@ class TestAuditExceptions:
 
     def test_well_scoped_returns_empty(self):
         exceptions = [
-            {"rules": "no-image-tags", "repo": "my-repo", "paths": ["src/**"],
-             "message": "*tag*", "reason": "test"},
+            {
+                "rules": "no-image-tags",
+                "repo": "my-repo",
+                "paths": ["src/**"],
+                "message": "*tag*",
+                "reason": "test",
+            },
         ]
         findings = _audit_exceptions(exceptions)
         assert len(findings) == 0
@@ -2452,6 +2472,7 @@ class TestAuditExceptions:
 
 
 # --- unused exceptions ---
+
 
 class TestUnusedExceptions:
     def test_renders_unused_exceptions_table(self):
@@ -2487,10 +2508,15 @@ class TestUnusedExceptions:
             {"rules": "no-image-tags", "reason": "used"},
             {"rules": "*", "reason": "unused one"},
         ]
-        data = json.loads(render_json(
-            "READY", results, "repo",
-            exceptions=exceptions, exception_hits=[1, 0],
-        ))
+        data = json.loads(
+            render_json(
+                "READY",
+                results,
+                "repo",
+                exceptions=exceptions,
+                exception_hits=[1, 0],
+            )
+        )
         assert "unused_exceptions" in data
         assert len(data["unused_exceptions"]) == 1
         assert data["unused_exceptions"][0]["reason"] == "unused one"
@@ -2498,14 +2524,20 @@ class TestUnusedExceptions:
     def test_json_report_no_unused_when_all_hit(self):
         results = [RuleResult(rule="r", findings=[])]
         exceptions = [{"rules": "*", "reason": "ok"}]
-        data = json.loads(render_json(
-            "READY", results, "repo",
-            exceptions=exceptions, exception_hits=[1],
-        ))
+        data = json.loads(
+            render_json(
+                "READY",
+                results,
+                "repo",
+                exceptions=exceptions,
+                exception_hits=[1],
+            )
+        )
         assert "unused_exceptions" not in data
 
 
 # --- audit exceptions CLI ---
+
 
 class TestAuditExceptionsCLI:
     def test_flag_parsed(self):

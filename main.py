@@ -395,9 +395,10 @@ def parse_args(argv=None):
         "Exit code 0 if none, 2 if any found.",
     )
     parser.add_argument(
-        "--audit-exceptions", action="store_true",
+        "--audit-exceptions",
+        action="store_true",
         help="Analyze exception entries for overly broad scope and exit. "
-             "Exit code 0 if no warnings, 2 if any found.",
+        "Exit code 0 if no warnings, 2 if any found.",
     )
     return parser.parse_args(argv)
 
@@ -778,44 +779,50 @@ def _audit_exceptions(exceptions):
     findings = []
     for i, exc in enumerate(exceptions):
         rules = exc.get("rules", "")
-        is_wildcard = (rules == ANY_RULE)
+        is_wildcard = rules == ANY_RULE
         has_repo = bool(exc.get("repo"))
         has_message = bool(exc.get("message"))
         has_images = bool(exc.get("images"))
         has_paths = bool(exc.get("paths"))
 
         if is_wildcard and has_repo:
-            findings.append({
-                "index": i,
-                "level": "warning",
-                "reason": (
-                    f"Repo-specific exception for '{exc.get('repo')}' uses "
-                    f"rules: \"*\" — consider listing specific rule names"
-                ),
-                "exception": exc,
-            })
+            findings.append(
+                {
+                    "index": i,
+                    "level": "warning",
+                    "reason": (
+                        f"Repo-specific exception for '{exc.get('repo')}' uses "
+                        f'rules: "*" — consider listing specific rule names'
+                    ),
+                    "exception": exc,
+                }
+            )
         elif is_wildcard and not has_repo:
-            findings.append({
-                "index": i,
-                "level": "info",
-                "reason": "Universal wildcard exception (expected for test/CI/build dirs)",
-                "exception": exc,
-            })
+            findings.append(
+                {
+                    "index": i,
+                    "level": "info",
+                    "reason": "Universal wildcard exception (expected for test/CI/build dirs)",
+                    "exception": exc,
+                }
+            )
 
         if has_repo and has_paths and not has_message and not has_images:
             paths = exc.get("paths", [])
             has_broad_glob = any("**" in p or p.endswith("*") for p in paths)
             if has_broad_glob:
-                findings.append({
-                    "index": i,
-                    "level": "warning",
-                    "reason": (
-                        f"Repo-specific exception for '{exc.get('repo')}' has "
-                        f"only broad path globs — consider adding message or "
-                        f"images filter for finer granularity"
-                    ),
-                    "exception": exc,
-                })
+                findings.append(
+                    {
+                        "index": i,
+                        "level": "warning",
+                        "reason": (
+                            f"Repo-specific exception for '{exc.get('repo')}' has "
+                            f"only broad path globs — consider adding message or "
+                            f"images filter for finer granularity"
+                        ),
+                        "exception": exc,
+                    }
+                )
 
     return findings
 
@@ -825,7 +832,8 @@ def _build_unused_exceptions_section(exceptions, exception_hits):
     if not exceptions or not exception_hits:
         return ""
     unused = [
-        exc for i, exc in enumerate(exceptions)
+        exc
+        for i, exc in enumerate(exceptions)
         if i < len(exception_hits) and exception_hits[i] == 0
     ]
     if not unused:
@@ -1305,9 +1313,7 @@ def main(argv=None):
         return 2
 
     if args.audit_exceptions:
-        config_path = args.config or str(
-            Path(__file__).parent / CENTRAL_CONFIG_PATH
-        )
+        config_path = args.config or str(Path(__file__).parent / CENTRAL_CONFIG_PATH)
         central_cfg = load_central_config(config_path)
         exceptions = central_cfg["exceptions"]
         audit_findings = _audit_exceptions(exceptions)
@@ -1322,23 +1328,25 @@ def main(argv=None):
                 rules_value = exc.get("rules", "")
                 if isinstance(rules_value, list):
                     rules_value = ", ".join(rules_value)
-                print(f"{finding['index'] + 1:<4} "
-                      f"{rules_value:<30} "
-                      f"{exc.get('repo', ''):<25} "
-                      f"{finding['reason']}")
+                print(
+                    f"{finding['index'] + 1:<4} "
+                    f"{rules_value:<30} "
+                    f"{exc.get('repo', ''):<25} "
+                    f"{finding['reason']}"
+                )
             print()
         if infos:
-            print(f"{len(infos)} info(s) — universal wildcard exceptions "
-                  f"(expected for test/CI/build dirs):\n")
+            print(
+                f"{len(infos)} info(s) — universal wildcard exceptions "
+                f"(expected for test/CI/build dirs):\n"
+            )
             print(f"{'#':<4} {'Paths (first)':<50} Reason")
             print("-" * 80)
             for finding in infos:
                 exc = finding["exception"]
                 paths = exc.get("paths", [])
                 first_path = paths[0] if paths else "(no paths)"
-                print(f"{finding['index'] + 1:<4} "
-                      f"{first_path:<50} "
-                      f"{exc.get('reason', '')}")
+                print(f"{finding['index'] + 1:<4} {first_path:<50} {exc.get('reason', '')}")
         if not audit_findings:
             print("No audit findings — all exceptions are well-scoped.")
             return 0
