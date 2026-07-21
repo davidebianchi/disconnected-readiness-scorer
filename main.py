@@ -394,6 +394,11 @@ def parse_args(argv=None):
         help="List expired and soon-to-expire exceptions and exit. "
         "Exit code 0 if none, 2 if any found.",
     )
+    parser.add_argument(
+        "--audit-exceptions", action="store_true",
+        help="Analyze exception entries for overly broad scope and exit. "
+             "Exit code 0 if no warnings, 2 if any found.",
+    )
     return parser.parse_args(argv)
 
 
@@ -568,6 +573,17 @@ def render_json(
                 }
                 for exc, days_since in expired
             ]
+        unused = [
+            {
+                "rules": sorted(_normalize_rules(exc.get("rules", ""))),
+                "reason": exc.get("reason", ""),
+                **({"repo": exc["repo"]} if exc.get("repo") else {}),
+            }
+            for i, exc in enumerate(exceptions)
+            if i < len(exception_hits) and exception_hits[i] == 0
+        ]
+        if unused:
+            data["unused_exceptions"] = unused
     if snippets:
         data["false_positive_help"] = {
             "exception_snippets": snippets,
@@ -750,6 +766,91 @@ def _find_expired_exceptions(exceptions, *, today=None):
     return expired
 
 
+def _audit_exceptions(exceptions):
+    """Analyze exceptions for overly broad scope.
+
+    Returns a list of audit finding dicts with keys:
+      - index: 0-based position in the exceptions list
+      - level: "warning" or "info"
+      - reason: human-readable explanation
+      - exception: the original exception dict
+    """
+    findings = []
+    for i, exc in enumerate(exceptions):
+        rules = exc.get("rules", "")
+        is_wildcard = (rules == ANY_RULE)
+        has_repo = bool(exc.get("repo"))
+        has_message = bool(exc.get("message"))
+        has_images = bool(exc.get("images"))
+        has_paths = bool(exc.get("paths"))
+
+        if is_wildcard and has_repo:
+            findings.append({
+                "index": i,
+                "level": "warning",
+                "reason": (
+                    f"Repo-specific exception for '{exc.get('repo')}' uses "
+                    f"rules: \"*\" — consider listing specific rule names"
+                ),
+                "exception": exc,
+            })
+        elif is_wildcard and not has_repo:
+            findings.append({
+                "index": i,
+                "level": "info",
+                "reason": "Universal wildcard exception (expected for test/CI/build dirs)",
+                "exception": exc,
+            })
+
+        if has_repo and has_paths and not has_message and not has_images:
+            paths = exc.get("paths", [])
+            has_broad_glob = any("**" in p or p.endswith("*") for p in paths)
+            if has_broad_glob:
+                findings.append({
+                    "index": i,
+                    "level": "warning",
+                    "reason": (
+                        f"Repo-specific exception for '{exc.get('repo')}' has "
+                        f"only broad path globs — consider adding message or "
+                        f"images filter for finer granularity"
+                    ),
+                    "exception": exc,
+                })
+
+    return findings
+
+
+def _build_unused_exceptions_section(exceptions, exception_hits):
+    """Build markdown section listing exceptions that matched zero findings."""
+    if not exceptions or not exception_hits:
+        return ""
+    unused = [
+        exc for i, exc in enumerate(exceptions)
+        if i < len(exception_hits) and exception_hits[i] == 0
+    ]
+    if not unused:
+        return ""
+    lines = [
+        "## Unused Exceptions",
+        "",
+        f"{len(unused)} exception(s) matched zero findings in this scan "
+        "(may be stale or only relevant to other repos).",
+        "",
+        "| Rules | Repo | Reason |",
+        "|-------|------|--------|",
+    ]
+    for exc in unused:
+        rules_value = exc.get("rules", "")
+        if isinstance(rules_value, list):
+            rules_value = ", ".join(rules_value)
+        rules_cell = _escape_md_cell(rules_value)
+        repo = _escape_md_cell(exc.get("repo", ""))
+        reason = _escape_md_cell(exc.get("reason", ""))
+        lines.append(f"| {rules_cell} | {repo} | {reason} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _build_expiring_exceptions_section(exceptions, exception_hits, *, today=None):
     """Build markdown section warning about soon-to-expire exceptions."""
     expiring = _find_expiring_exceptions(exceptions, exception_hits, today=today)
@@ -843,6 +944,9 @@ def render_markdown(score, results, repo_name, exceptions=None, exception_hits=N
         ),
         "expired_exceptions_section": _build_expired_exceptions_section(
             exceptions or [], today=today
+        ),
+        "unused_exceptions_section": _build_unused_exceptions_section(
+            exceptions or [], exception_hits or []
         ),
         "false_positive_section": _build_false_positive_section(_build_exception_snippets(results)),
     }
@@ -1199,6 +1303,46 @@ def main(argv=None):
             print("No expired or expiring exceptions found.")
             return 0
         return 2
+
+    if args.audit_exceptions:
+        config_path = args.config or str(
+            Path(__file__).parent / CENTRAL_CONFIG_PATH
+        )
+        central_cfg = load_central_config(config_path)
+        exceptions = central_cfg["exceptions"]
+        audit_findings = _audit_exceptions(exceptions)
+        warnings = [f for f in audit_findings if f["level"] == "warning"]
+        infos = [f for f in audit_findings if f["level"] == "info"]
+        if warnings:
+            print(f"{len(warnings)} warning(s) — exceptions with overly broad scope:\n")
+            print(f"{'#':<4} {'Rules':<30} {'Repo':<25} Reason")
+            print("-" * 100)
+            for finding in warnings:
+                exc = finding["exception"]
+                rules_value = exc.get("rules", "")
+                if isinstance(rules_value, list):
+                    rules_value = ", ".join(rules_value)
+                print(f"{finding['index'] + 1:<4} "
+                      f"{rules_value:<30} "
+                      f"{exc.get('repo', ''):<25} "
+                      f"{finding['reason']}")
+            print()
+        if infos:
+            print(f"{len(infos)} info(s) — universal wildcard exceptions "
+                  f"(expected for test/CI/build dirs):\n")
+            print(f"{'#':<4} {'Paths (first)':<50} Reason")
+            print("-" * 80)
+            for finding in infos:
+                exc = finding["exception"]
+                paths = exc.get("paths", [])
+                first_path = paths[0] if paths else "(no paths)"
+                print(f"{finding['index'] + 1:<4} "
+                      f"{first_path:<50} "
+                      f"{exc.get('reason', '')}")
+        if not audit_findings:
+            print("No audit findings — all exceptions are well-scoped.")
+            return 0
+        return 2 if warnings else 0
 
     try:
         if args.operator_path:

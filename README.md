@@ -40,9 +40,10 @@ python3 main.py /path/to/target/repo --config /path/to/config.yaml              
 python3 main.py /path/to/target/repo --arch-analyzer /path/to/arch-analyzer     # custom arch-analyzer binary
 python3 main.py /path/to/target/repo --verbose                                 # diagnostics + timing + files_checked in JSON
 python3 main.py --list-expiring                                                # list exceptions expiring within 14 days
+python3 main.py --audit-exceptions                                             # analyze exception scope quality
 ```
 
-Exit code is `0` for READY, `1` for NOT READY.
+Exit code is `0` for READY, `1` for NOT READY. `--list-expiring` and `--audit-exceptions` exit with `2` if findings exist.
 
 ### Individual rules
 
@@ -232,11 +233,39 @@ Add this exception to the scorer's `config/config.yaml`. Use the `repo` field to
 
 If you think a finding is caused by a bug in the scanner (not just a repo-specific exclusion), file a Jira ticket under RHOAIENG and add the ticket URL as a `reference` in your exception entry. The AI Core Platform team triages these and either fixes the rule or confirms the exception is permanent.
 
+### Pattern matching
+
+Exception matching uses **glob patterns** (via Python's `fnmatch`), not regex. Glob patterns support:
+
+- `*` — matches any sequence of characters (except `/` in paths)
+- `?` — matches exactly one character
+- `[abc]` — matches one character from the set
+- `**/ ` prefix — matches at any directory depth (extended glob)
+- `/**` suffix — matches directory and all contents
+
+For `message` matching, use `*text*` for substring matching (e.g. `message: "*hardcoded*"`). Exact strings without wildcards must match the full message.
+
+Regex support was evaluated and deferred — glob patterns cover the current use cases. If regex becomes necessary in the future, a `re:` prefix syntax (e.g. `message: "re:pattern-(a|b)"`) is the planned extension point.
+
+### Auditing exceptions
+
+Use `--audit-exceptions` to analyze exception quality without running a full scan:
+
+```bash
+python3 main.py --audit-exceptions
+```
+
+This reports:
+- **Warnings**: repo-specific exceptions using `rules: "*"` (should list specific rules) or having only `paths` without `message`/`images` filters
+- **Info**: universal wildcard exceptions (expected for test/CI/build dirs)
+
+During a normal scan, the report also includes an **Unused Exceptions** section listing entries that matched zero findings — these may be stale or only relevant to other repos.
+
 ### Common Errors
 
 **"at least one scope filter"** — Include `paths`, `images`, or `message` to limit the exception. Disabling an entire rule is not allowed.
 
-**"unknown field(s)"** — Check for typos in field names. Valid fields: `rules`, `repo`, `paths`, `images`, `message`, `reason`, `reference`.
+**"unknown field(s)"** — Check for typos in field names. Valid fields: `rules`, `repo`, `paths`, `images`, `message`, `reason`, `reference`, `expires`.
 
 ## PR Integration
 
