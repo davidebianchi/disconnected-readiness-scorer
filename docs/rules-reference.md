@@ -35,7 +35,8 @@ Key utility functions:
 | `is_file_in_production_scope(filepath, scope)` | Returns `True` (in scope), `False` (out of scope), or `None` (scope not computed). Checks `production_dirs` and `production_files`. |
 | `is_yaml_in_production_scope(filepath, scope)` | Checks if a YAML file is in the `manifest_files` set. |
 | `build_overlay_file_map(arch_data, repo_root)` | Builds a dict mapping kustomize overlay identifiers to sets of file paths using arch-analyzer's `kustomize_components` data. |
-| `is_non_production_overlay_file(filepath, scope, overlay_map)` | Returns `True` if the file belongs to a kustomize overlay that is not in the operator's deployed `overlay_paths`. Used to downgrade findings to `info`. |
+| `is_non_production_overlay_file(filepath, scope, overlay_map)` | Returns `True` if the file belongs to a kustomize overlay that is not in the operator's deployed `overlay_paths`. |
+| `downgrade_non_production_overlay(severity, msg, filepath, scope, overlay_map)` | Shared helper used by `no-image-tags` and `image-manifest-complete`: if severity is `blocker` and the file is a non-production overlay, returns `info` with a `[non-production overlay]` message suffix. |
 | `find_params_env_dirs(repo_root)` | Finds all directories containing both `params.env` and `kustomization.yaml`. |
 | `detect_image_pattern(repo_root)` | Detects whether the repo uses `RELATED_IMAGE_*` env vars (`env_var`) or static CSV `relatedImages` (`static_csv`). Shared by `image-manifest-complete` and `no-image-tags` — both need to know this before deciding whether to request the operator manifest. |
 
@@ -133,12 +134,17 @@ Two regex patterns scan each line:
 
 ### Severity logic
 
-- Images in `params.env` → **info** (excluded file, handled by the params_env rule).
-- Images in non-production kustomize overlays → **info** (downgraded via overlay detection).
-- All other tagged images → **blocker**, with additional context:
-  - Source code files (`.go`, `.py`, `.ts`, `.sh`): "Hardcoded in source code."
-  - Manifest files: "Manifest file not managed by params.env."
-  - OCI URIs: specific message about missing digest pin.
+Ordered stages (see `rules/no_image_tags.py` module docstring). Stages 1–4 run in `_emit_finding`; stage 0 and stage 5 run in `run()`:
+
+0. Files outside production scope → **skipped** (no finding).
+1. Images in `params.env` → **info** (excluded file, handled by the params_env rule).
+2. Images in non-production kustomize overlays → **info** (`downgrade_non_production_overlay`, `[non-production overlay]`).
+3. Tagged matches on YAML lines belonging to OpenAPI-style documentation fields (`description` / `example` / `examples`, via `documentation_field_lines()` in `rules/yaml_documentation_fields.py`) → **info** (`[documentation field]`). Schema keywords `default` / `enum` / `const` never inherit docs status from an ancestor docs key.
+4. Remaining tagged images → **blocker**, with additional context:
+   - Source code files (`.go`, `.py`, `.ts`, `.sh`): "Hardcoded in source code."
+   - Manifest files: "Manifest file not managed by params.env."
+   - OCI URIs: specific message about missing digest pin.
+5. When `manifest_env_vars` is set, remaining **blocker** findings may become **info** via the RELATED_IMAGE post-pass (below).
 
 ### Manifest cross-reference downgrade
 
@@ -151,7 +157,10 @@ When `manifest_env_vars` is provided (from the operator manifest, same as `image
 
 This is deliberately **stricter** than `image-manifest-complete`'s own same-line → whole-file → sibling-`.go`-file lookup (see "Detection logic" → "A) env_var pattern" in its rule section above), which is unchanged. A review found that reusing that coarser lookup for `no-image-tags` produced false negatives — an unrelated var anywhere in the file, or in a sibling file, being treated as "covering" an unrelated image — because downgrading a `no-image-tags` finding cancels a different rule's independently-detected tag-mutability defect outright, not just an internal annotation the way it does inside `image-manifest-complete` itself. The two rules do not share this decision logic; `no_image_tags.py`'s balanced-paren block detection is private to that module.
 
-**Known limitations:** a block containing more than one image reference or more than one `RELATED_IMAGE_*` var (e.g. a call with several arguments, or nested calls sharing an outer block) can still associate the wrong var with the wrong image — exact per-argument correspondence needs real parsing and is out of scope. A `RELATED_IMAGE_*` var name appearing inside an unrelated string literal within the same block (not the intended argument) is still treated as confirmed coverage — only trailing comments are stripped before matching, not string contents, since the intended var reference is itself normally a string literal; distinguishing "the string this rule expects" from "some other string that happens to contain the same text" needs real per-argument parsing too.
+**Known limitations:**
+
+- **RELATED_IMAGE matching:** a block containing more than one image reference or more than one `RELATED_IMAGE_*` var (e.g. a call with several arguments, or nested calls sharing an outer block) can still associate the wrong var with the wrong image — exact per-argument correspondence needs real parsing and is out of scope. A `RELATED_IMAGE_*` var name appearing inside an unrelated string literal within the same block (not the intended argument) is still treated as confirmed coverage — only trailing comments are stripped before matching, not string contents, since the intended var reference is itself normally a string literal; distinguishing "the string this rule expects" from "some other string that happens to contain the same text" needs real per-argument parsing too.
+- **Documentation-field line granularity:** docs detection records whole line numbers, matching the line-based image regex scan. A real `image:` key that shares a physical line with a `description` / `example` / `examples` key in flow-style YAML (e.g. `{description: "…", image: quay.io/evil:latest}`) is also downgraded to info. Idiomatic Kubernetes/CRD YAML is block-style, so this is rare; column-range tracking would close it.
 
 ---
 
@@ -381,7 +390,7 @@ When `--operator-path` is not provided, the orchestrator creates a `tempfile.Tem
 
 ### What it does
 
-Reduces false positives by narrowing the scan to production-relevant source code. All rules check production scope: files outside it have their findings downgraded from blocker to info.
+All rules check production scope: files outside it are skipped.
 
 ### How it determines production scope
 

@@ -1,5 +1,20 @@
 #!/usr/bin/env python3
-"""Enforce digest-only image references — reject mutable tags."""
+"""Enforce digest-only image references — reject mutable tags.
+
+Severity pipeline:
+
+0. ``run()`` skips files outside production scope (no finding).
+1. ``_emit_finding`` — params.env excluded file → info.
+2. ``_emit_finding`` — non-production kustomize overlay → info.
+3. ``_emit_finding`` — YAML documentation-field line → info
+   (``[documentation field]``).
+4. Else emit as blocker (with source/manifest/OCI message context).
+5. ``_downgrade_confirmed_related_image_findings`` post-pass — remaining
+   blockers → info when a confirmed ``RELATED_IMAGE_*`` covers the image
+   (enclosing-block / same-line match over emitted findings).
+
+Orchestrator path-glob exceptions apply after the rule returns.
+"""
 
 import re
 from pathlib import Path
@@ -10,14 +25,15 @@ try:
         RELATED_IMAGE_PATTERN,
         SKIP_DIRS,
         Finding,
+        ProductionScope,
         RuleResult,
         Severity,
         build_overlay_file_map,
         detect_image_pattern,  # noqa: F401 -- re-exported so main.py's hasattr() detection finds it
+        downgrade_non_production_overlay,
         find_params_env_dirs,
         get_tracked_files,
         is_file_in_production_scope,
-        is_non_production_overlay_file,
         production_scope_relative_dirs,
     )
 except ModuleNotFoundError:
@@ -26,16 +42,22 @@ except ModuleNotFoundError:
         RELATED_IMAGE_PATTERN,
         SKIP_DIRS,
         Finding,
+        ProductionScope,
         RuleResult,
         Severity,
         build_overlay_file_map,
         detect_image_pattern,  # noqa: F401 -- re-exported so main.py's hasattr() detection finds it
+        downgrade_non_production_overlay,
         find_params_env_dirs,
         get_tracked_files,
         is_file_in_production_scope,
-        is_non_production_overlay_file,
         production_scope_relative_dirs,
     )
+
+try:
+    from rules.yaml_documentation_fields import documentation_field_lines
+except ModuleNotFoundError:
+    from yaml_documentation_fields import documentation_field_lines
 
 IMAGE_REF_PATTERN = re.compile(
     r"(https?://|oci://)?"
@@ -82,10 +104,47 @@ def is_source_code(filepath: Path) -> bool:
 _MAX_FILE_SIZE = 512 * 1024  # 512 KB
 
 
+def _emit_finding(
+    findings: list[Finding],
+    filepath: Path,
+    relative: str,
+    line: int,
+    image_str: str,
+    base_msg: str,
+    not_excluded_suffix: str,
+    production_scope: ProductionScope | None,
+    overlay_file_map: dict[str, set[Path]],
+    docs_lines: set[int],
+) -> None:
+    """Severity stages 1–4: classify a match and append its ``Finding``.
+
+    Both ``scan_file()`` match branches (qualified images and unqualified
+    k8s ``image:`` fields) use this emitter. Stage 0 and stage 5 live in
+    ``run()`` — see module docstring.
+    """
+    # Stage 1: params.env excluded file
+    if is_excluded_file(filepath):
+        severity, msg = "info", f"{base_msg} File is excluded (params.env)."
+    else:
+        severity = "blocker"
+        msg = f"{base_msg} {not_excluded_suffix}" if not_excluded_suffix else base_msg
+
+    # Stage 2: non-production kustomize overlay
+    severity, msg = downgrade_non_production_overlay(
+        severity, msg, filepath, production_scope, overlay_file_map
+    )
+    # Stage 3: YAML documentation-field line; stage 4: remaining blocker
+    if severity == "blocker" and line in docs_lines:
+        severity, msg = "info", msg + " [documentation field]"
+    findings.append(
+        Finding(severity=severity, file=relative, line=line, image=image_str, message=msg)
+    )
+
+
 def scan_file(
     filepath: Path,
     root: Path,
-    production_scope=None,
+    production_scope: ProductionScope | None = None,
     overlay_file_map: dict[str, set[Path]] | None = None,
     non_image_prefixes: list[str] | None = None,
 ) -> list[Finding]:
@@ -105,11 +164,13 @@ def scan_file(
                 )
             )
             return findings
-        lines = filepath.read_text().splitlines()
+        text = filepath.read_text()
+        lines = text.splitlines()
     except (OSError, UnicodeDecodeError):
         return findings
 
     is_yaml = filepath.suffix in YAML_EXTENSIONS or filepath.name == "params.env"
+    docs_lines = documentation_field_lines(text) if filepath.suffix in YAML_EXTENSIONS else set()
     found_on_line = set()
 
     for i, line in enumerate(lines, 1):
@@ -163,33 +224,25 @@ def scan_file(
                 )
 
             relative = str(filepath.relative_to(root))
-            if is_excluded_file(filepath):
-                severity = "info"
-                msg = f"{base_msg} File is excluded (params.env)."
+            if is_oci:
+                suffix = ""
+            elif is_source_code(filepath):
+                suffix = "Hardcoded in source code."
             else:
-                severity = "blocker"
-                if is_oci:
-                    msg = base_msg
-                elif is_source_code(filepath):
-                    msg = f"{base_msg} Hardcoded in source code."
-                else:
-                    msg = f"{base_msg} Manifest file not managed by params.env."
-
-            if severity in ("blocker", "warning") and is_non_production_overlay_file(
-                filepath, production_scope, overlay_file_map
-            ):
-                severity = "info"
-                msg += " [non-production overlay]"
+                suffix = "Manifest file not managed by params.env."
 
             found_on_line.add(i)
-            findings.append(
-                Finding(
-                    severity=severity,
-                    file=relative,
-                    line=i,
-                    image=image_str,
-                    message=msg,
-                )
+            _emit_finding(
+                findings,
+                filepath,
+                relative,
+                i,
+                image_str,
+                base_msg,
+                suffix,
+                production_scope,
+                overlay_file_map,
+                docs_lines,
             )
 
         if is_yaml and i not in found_on_line:
@@ -205,27 +258,17 @@ def scan_file(
                     f"uses tag ':{tag}' instead of digest."
                 )
 
-                if is_excluded_file(filepath):
-                    severity = "info"
-                    msg = f"{base_msg} File is excluded (params.env)."
-                else:
-                    severity = "blocker"
-                    msg = f"{base_msg} Manifest file not managed by params.env."
-
-                if severity == "blocker" and is_non_production_overlay_file(
-                    filepath, production_scope, overlay_file_map
-                ):
-                    severity = "info"
-                    msg += " [non-production overlay]"
-
-                findings.append(
-                    Finding(
-                        severity=severity,
-                        file=relative,
-                        line=i,
-                        image=image_str,
-                        message=msg,
-                    )
+                _emit_finding(
+                    findings,
+                    filepath,
+                    relative,
+                    i,
+                    image_str,
+                    base_msg,
+                    "Manifest file not managed by params.env.",
+                    production_scope,
+                    overlay_file_map,
+                    docs_lines,
                 )
 
     return findings
@@ -455,10 +498,12 @@ def _downgrade_confirmed_related_image_findings(
     root: Path,
     manifest_env_vars: set[str],
 ) -> None:
-    """Downgrade blocker findings to info when a confirmed RELATED_IMAGE_*
-    var already covers the image. See docs/rules-reference.md's "Manifest
-    cross-reference downgrade" section for the full matching semantics and
-    known limitations.
+    """Severity stage 5: RELATED_IMAGE coverage on remaining blockers.
+
+    Downgrades a blocker to info when a confirmed RELATED_IMAGE_* var covers
+    the image (enclosing-block / same-line match). See
+    docs/rules-reference.md's "Manifest cross-reference downgrade" section
+    for matching semantics and known limitations.
     """
     blockers = [f for f in result.findings if f.severity == "blocker"]
     if not blockers:
@@ -555,6 +600,7 @@ def run(
             continue
         if params_env_prefixes and str(resolved).startswith(params_env_prefixes):
             continue
+        # Stage 0: outside production scope → skip
         if is_file_in_production_scope(filepath, production_scope) is False:
             continue
 
@@ -570,6 +616,7 @@ def run(
             if finding.severity == "blocker":
                 result.passed = False
 
+    # Stage 5: RELATED_IMAGE coverage on remaining blockers
     if manifest_env_vars is not None:
         _downgrade_confirmed_related_image_findings(result, root, manifest_env_vars)
 

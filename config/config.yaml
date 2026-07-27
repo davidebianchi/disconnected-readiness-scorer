@@ -614,15 +614,6 @@ exceptions:
     reason: "Checked-in default image for the operand Deployment — replaced at reconcile via OperandImage (RELATED_IMAGE_ODH_MCP_LIFECYCLE_OPERATOR_IMAGE, digest-pinned in ODH/RHOAI Build-Config)"
     reference: "https://github.com/opendatahub-io/mcp-lifecycle-module-operator/blob/main/internal/controller/mcplifecycleoperator_reconciler.go"
 
-  - rules: no-image-tags
-    repo: mcp-lifecycle-module-operator
-    paths:
-      - "internal/controller/resources/mcp-lifecycle-operator.yaml"
-    images:
-      - "ghcr.io/modelcontextprotocol/servers/filesystem:*"
-      - "ghcr.io/modelcontextprotocol/servers/github:*"
-      - "custom-registry.io/my-mcp-server:*"
-    reason: "CRD OpenAPI description examples in checked-in MCPLO operand manifests — documentation only, not deployed"
 
   # --- rhoai-mcp ---
   # rhoai-mcp is an MCP server (AI agent tool layer), not a Kubernetes operator.

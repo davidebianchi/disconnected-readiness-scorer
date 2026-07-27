@@ -39,7 +39,7 @@ Every container image reference must be mapped to a `RELATED_IMAGE_*` env var (o
 
 - **Stale vars**: If the scanner flags a `RELATED_IMAGE_*` var that exists in your repo but is no longer in the operator manifest, remove the stale reference from your code.
 
-**False positives:** Build-time-only images (in scripts that generate Dockerfiles but never run on-cluster), images behind disabled feature gates, and files marked `[out of production scope]` (not compiled into the production binary). If a non-production file is not already auto-excluded, add a path exclusion in [config/config.yaml](https://github.com/opendatahub-io/disconnected-readiness-scorer/blob/main/config/config.yaml) (see [Excluding False Positives from Scans](#excluding-false-positives-from-scans)).
+**False positives:** Build-time-only images (in scripts that generate Dockerfiles but never run on-cluster), and images behind disabled feature gates. If a non-production file is reported and is not already auto-excluded, add a path exclusion in [config/config.yaml](https://github.com/opendatahub-io/disconnected-readiness-scorer/blob/main/config/config.yaml) (see [Excluding False Positives from Scans](#excluding-false-positives-from-scans)).
 
 ## 2. Mutable Image Tags (`no-image-tags`)
 
@@ -49,7 +49,7 @@ All image references must use `@sha256:` digests, not mutable tags (`:latest`, `
 
 **Remediate:** Replace tags with digest pins. Use `skopeo inspect --format '{{.Digest}}' docker://registry/image:tag` to look up the current digest.
 
-**False positives:** Build-time images (Dockerfiles, CI scripts) that are never pulled on-cluster should be auto-excluded. Files marked `[out of production scope]` are already downgraded. Non-image strings that happen to match the `registry/org/name:tag` pattern (npm refs in `package.json` are already excluded, but other formats may occasionally trigger).
+**False positives:** Build-time images (Dockerfiles, CI scripts) that are never pulled on-cluster should be auto-excluded. Non-image strings that happen to match the `registry/org/name:tag` pattern (npm refs in `package.json` are already excluded, but other formats may occasionally trigger).
 
 ## 3. Runtime Network Egress (`no-runtime-egress`)
 
@@ -59,7 +59,7 @@ Detects outbound HTTP/network calls (`http.Get`, `requests.get`, `fetch`, `curl`
 
 **Remediate:** Make hardcoded external URLs configurable through environment variables or config files so customers can point them at an internal mirror or proxy. For HuggingFace models, pre-bundle them in the container image instead of downloading at runtime. Remove unneeded external calls entirely where possible. For reference, the odh-model-controller supports `spec.components.kserve.nim.airGapped` on the DSC to skip external NIM API calls and use locally cached model catalogs instead — this is the pattern for handling features that inherently need external access.
 
-**False positives:** HTTP client setup code that constructs a client but only calls internal endpoints; Go files outside production scope; URLs that are configurable but the config read happens on a different line. Verify manually and add a central exclusion if confirmed safe.
+**False positives:** HTTP client setup code that constructs a client but only calls internal endpoints; URLs that are configurable but the config read happens on a different line. Verify manually and add a central exclusion if confirmed safe.
 
 ## 4. Python Dependency Availability (`python-imports-bundled`)
 
@@ -111,7 +111,6 @@ Ask yourself: **does this code actually run on a customer cluster in production?
 - **No, it's test/CI/docs/examples** → Should be auto-excluded; if not, add a path exclusion
 - **No, it only runs at build time** → Not a runtime concern (e.g. Dockerfiles, build scripts, lockfile generators)
 - **No, it's in a manifest that isn't deployed** → Not a customer-facing resource
-- **Unsure** → Check whether the finding is annotated `[out of production scope]`, which means the scanner determined it's not in the production code path. If there's no annotation and you still believe it's a false positive, open a PR to add an exclusion with a reason.
 - **Yes, it runs in production** → The finding is real and needs remediation (or a time-bounded exception — see below)
 
 ## Excluding False Positives from Scans

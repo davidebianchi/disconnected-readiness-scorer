@@ -214,7 +214,7 @@ def build_overlay_file_map(
 
 def is_non_production_overlay_file(
     filepath: Path,
-    production_scope,
+    production_scope: ProductionScope | None,
     overlay_file_map: dict[str, set[Path]],
 ) -> bool:
     """Check if file is in a non-production overlay.
@@ -235,6 +235,27 @@ def is_non_production_overlay_file(
             in_any_overlay = True
 
     return in_any_overlay
+
+
+def downgrade_non_production_overlay(
+    severity: str,
+    msg: str,
+    filepath: Path,
+    production_scope: ProductionScope | None,
+    overlay_file_map: dict[str, set[Path]],
+) -> tuple[str, str]:
+    """Downgrade a blocker to info if ``filepath`` lives in a non-production
+    kustomize overlay, appending the ``[non-production overlay]`` suffix.
+
+    Shared by every rule that classifies findings by overlay membership
+    (``no_image_tags.py``, ``image_manifest_complete.py``) so the downgrade
+    condition and message suffix can't drift out of sync between call sites.
+    """
+    if severity == "blocker" and is_non_production_overlay_file(
+        filepath, production_scope, overlay_file_map
+    ):
+        return "info", msg + " [non-production overlay]"
+    return severity, msg
 
 
 # General source-scanning exclusions. Rules scanning the target repo import this set.
