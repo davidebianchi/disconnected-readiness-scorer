@@ -3,7 +3,7 @@
 import json
 
 from maturity_report import (
-    RULES,
+    _build_rule_def,
     _extract_exception_reasons,
     _finding_location,
     build_report,
@@ -65,39 +65,56 @@ FAILING_RULES = [
 
 
 class TestRuleDefinitions:
-    REQUIRED_FIELDS = {
-        "id",
-        "name",
-        "severity",
-        "remediation",
-        "reference_doc",
-    }
-
-    # Fields that belong to internal maturity system and must not appear
+    REQUIRED_FIELDS = {"id", "name", "severity", "remediation", "reference_doc"}
     FORBIDDEN_FIELDS = {"category", "stage", "scope", "owner", "depends_on"}
 
-    def test_all_rules_have_required_fields(self):
-        for rule_id, rule_def in RULES.items():
-            missing = self.REQUIRED_FIELDS - set(rule_def.keys())
-            assert not missing, f"Rule {rule_id} missing fields: {missing}"
+    def _make_entry(self, rule_id, **kwargs):
+        """Build a minimal rule_entries list for _build_rule_def."""
+        return [{"rule_data": {"name": rule_id, **kwargs}}]
+
+    def test_required_fields_present(self):
+        rule_def = _build_rule_def(
+            "no-image-tags",
+            self._make_entry(
+                "no-image-tags",
+                display_name="No Mutable Image Tags",
+                remediation="Use digest refs.",
+                reference_doc="https://example.com/no-image-tags.md",
+            ),
+        )
+        missing = self.REQUIRED_FIELDS - set(rule_def.keys())
+        assert not missing
 
     def test_no_internal_fields_present(self):
-        for rule_id, rule_def in RULES.items():
-            leaked = self.FORBIDDEN_FIELDS & set(rule_def.keys())
-            assert not leaked, f"Rule {rule_id} contains internal fields: {leaked}"
+        rule_def = _build_rule_def("no-image-tags", self._make_entry("no-image-tags"))
+        leaked = self.FORBIDDEN_FIELDS & set(rule_def.keys())
+        assert not leaked
 
-    def test_rule_ids_match_keys(self):
-        for rule_id, rule_def in RULES.items():
-            assert rule_def["id"] == rule_id
+    def test_rule_id_matches(self):
+        rule_def = _build_rule_def("no-image-tags", self._make_entry("no-image-tags"))
+        assert rule_def["id"] == "no-image-tags"
 
-    def test_reference_doc_urls_are_absolute(self):
-        for rule_id, rule_def in RULES.items():
-            url = rule_def["reference_doc"]
-            assert url.startswith("https://"), f"Rule {rule_id} reference_doc not absolute: {url}"
-            assert rule_id in url, f"Rule {rule_id} reference_doc doesn't contain rule id"
+    def test_reference_doc_fallback_is_absolute_and_contains_id(self):
+        rule_def = _build_rule_def("my-rule", self._make_entry("my-rule"))
+        url = rule_def["reference_doc"]
+        assert url.startswith("https://")
+        assert "my-rule" in url
 
-    def test_five_rules_defined(self):
-        assert len(RULES) == 5
+    def test_display_name_from_data_is_used(self):
+        rule_def = _build_rule_def("my-rule", self._make_entry("my-rule", display_name="My Rule"))
+        assert rule_def["name"] == "My Rule"
+
+    def test_display_name_fallback_titlecases_id(self):
+        rule_def = _build_rule_def("my-rule", self._make_entry("my-rule"))
+        assert rule_def["name"] == "My Rule"
+
+    def test_remediation_from_data_is_used(self):
+        rule_def = _build_rule_def("my-rule", self._make_entry("my-rule", remediation="Fix it."))
+        assert rule_def["remediation"] == "Fix it."
+
+    def test_remediation_fallback_references_doc(self):
+        rule_def = _build_rule_def("my-rule", self._make_entry("my-rule"))
+        assert rule_def["reference_doc"] in rule_def["remediation"]
 
 
 # ─── 2. Repo mappings ──────────────────────────────────────────────
@@ -450,7 +467,7 @@ class TestBuildReport:
         # Rules as a list without internal fields
         assert isinstance(report["rules"], list)
         rule_ids = {r["id"] for r in report["rules"]}
-        assert rule_ids == set(RULES.keys())
+        assert rule_ids == {r["name"] for r in PASSING_RULES}
         for rule in report["rules"]:
             assert "category" not in rule
             assert "stage" not in rule
@@ -533,13 +550,14 @@ class TestEmptyInput:
 
 class TestExceptionPolicy:
     def test_all_rules_have_exception_policy(self):
-        for rule_id, rule_def in RULES.items():
-            assert "exception_policy" in rule_def, f"Rule {rule_id} missing exception_policy"
-            ep = rule_def["exception_policy"]
-            assert "mechanism" in ep
-            assert "source" in ep
-            assert "url" in ep["source"]
-            assert ep["source"]["url"].startswith("https://")
+        """_build_rule_def always includes exception_policy with the required shape."""
+        rule_def = _build_rule_def("any-rule", [{"rule_data": {"name": "any-rule"}}])
+        assert "exception_policy" in rule_def
+        ep = rule_def["exception_policy"]
+        assert "mechanism" in ep
+        assert "source" in ep
+        assert "url" in ep["source"]
+        assert ep["source"]["url"].startswith("https://")
 
     def test_exception_policy_in_report(self, tmp_path):
         reports_dir = tmp_path / "reports"
@@ -645,6 +663,55 @@ class TestExtractExceptionReasons:
 
 
 # ─── 12. Repository ref ───────────────────────────────────────────
+
+
+# ─── 13. Data-driven rule discovery ──────────────────────────────
+
+
+class TestDataDrivenRuleDiscovery:
+    def test_novel_rule_name_produces_evaluation(self, tmp_path):
+        """A rule name not in any static map should still produce an evaluation."""
+        rules = [
+            {
+                "name": "brand-new-rule",
+                "display_name": "Brand New Rule",
+                "remediation": "Fix the brand new thing.",
+                "reference_doc": "https://example.com/brand-new-rule.md",
+                "passed": False,
+                "blockers": 1,
+                "infos": 0,
+                "findings": [
+                    {
+                        "severity": "blocker",
+                        "file": "main.go",
+                        "line": 1,
+                        "image": "",
+                        "message": "something failed",
+                    },
+                ],
+            },
+        ]
+        reports_dir = tmp_path / "reports"
+        reports_dir.mkdir()
+        _write_repo_report(reports_dir, "org/repo", rules)
+
+        mappings_path = tmp_path / "mappings.json"
+        _write_repo_mappings(
+            mappings_path,
+            [{"repo": "org/repo", "jira_component": "Test", "tier": "midstream"}],
+        )
+
+        report = build_report(str(reports_dir), str(mappings_path), "", "1.0.0")
+        eval_ids = [e["rule_id"] for e in report["evaluations"]]
+        assert "brand-new-rule" in eval_ids
+
+        rule_defs = {r["id"]: r for r in report["rules"]}
+        assert "brand-new-rule" in rule_defs
+        assert rule_defs["brand-new-rule"]["name"] == "Brand New Rule"
+        assert rule_defs["brand-new-rule"]["remediation"] == "Fix the brand new thing."
+        assert (
+            rule_defs["brand-new-rule"]["reference_doc"] == "https://example.com/brand-new-rule.md"
+        )
 
 
 class TestRepositoryRef:

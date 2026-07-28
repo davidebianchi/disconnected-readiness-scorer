@@ -44,75 +44,32 @@ _EXCEPTION_POLICY = {
     },
 }
 
-RULES = {
-    "image-manifest-complete": {
-        "id": "image-manifest-complete",
-        "name": "Image manifest completeness",
+
+def _build_rule_def(rule_id: str, rule_entries: list[dict]) -> dict:
+    """Build a rule definition from the report data for this rule."""
+    display_name = ""
+    remediation = ""
+    reference_doc = ""
+    for entry in rule_entries:
+        rd = entry["rule_data"]
+        if not display_name and rd.get("display_name"):
+            display_name = rd["display_name"]
+        if not remediation and rd.get("remediation"):
+            remediation = rd["remediation"]
+        if not reference_doc and rd.get("reference_doc"):
+            reference_doc = rd["reference_doc"]
+
+    if not reference_doc:
+        reference_doc = f"{REFERENCE_DOC_BASE}/{rule_id}.md"
+
+    return {
+        "id": rule_id,
+        "name": display_name or rule_id.replace("-", " ").title(),
         "severity": "blocker",
-        "remediation": (
-            "Register all container images used by this component in the "
-            "operator manifest. For repos using the env-var pattern, add a "
-            "RELATED_IMAGE_* environment variable to the operator deployment. "
-            "For repos using the params.env pattern, add a key to params.env "
-            "and wire it through kustomize."
-        ),
-        "reference_doc": f"{REFERENCE_DOC_BASE}/image-manifest-complete.md",
+        "remediation": remediation or f"See {reference_doc} for guidance.",
+        "reference_doc": reference_doc,
         "exception_policy": _EXCEPTION_POLICY,
-    },
-    "no-image-tags": {
-        "id": "no-image-tags",
-        "name": "No mutable image tags",
-        "severity": "blocker",
-        "remediation": (
-            "Replace all mutable image tags (:latest, :v1.2, etc.) with "
-            "immutable @sha256: digest references. Mutable tags can resolve "
-            "to different images over time and cannot be pre-pulled reliably "
-            "for disconnected deployments."
-        ),
-        "reference_doc": f"{REFERENCE_DOC_BASE}/no-image-tags.md",
-        "exception_policy": _EXCEPTION_POLICY,
-    },
-    "no-runtime-egress": {
-        "id": "no-runtime-egress",
-        "name": "No runtime external calls",
-        "severity": "blocker",
-        "remediation": (
-            "Remove hardcoded external URLs from source code and manifests, "
-            "or make them configurable via environment variables or "
-            "configuration files. In a disconnected cluster, any outbound "
-            "network call to an external service will fail."
-        ),
-        "reference_doc": f"{REFERENCE_DOC_BASE}/no-runtime-egress.md",
-        "exception_policy": _EXCEPTION_POLICY,
-    },
-    "python-imports-bundled": {
-        "id": "python-imports-bundled",
-        "name": "Python imports bundled",
-        "severity": "blocker",
-        "remediation": (
-            "Ensure all Python package dependencies are included in the "
-            "offline-bundled package set or vendored into the container "
-            "image at build time. Runtime pip install calls will fail "
-            "without network access."
-        ),
-        "reference_doc": f"{REFERENCE_DOC_BASE}/python-imports-bundled.md",
-        "exception_policy": _EXCEPTION_POLICY,
-    },
-    "params-env-wiring": {
-        "id": "params-env-wiring",
-        "name": "Params.env wiring",
-        "severity": "blocker",
-        "remediation": (
-            "Complete the params.env wiring chain: every image reference "
-            "must flow from params.env through a kustomize configMapGenerator "
-            "into the rendered manifests. Check for hardcoded images not "
-            "sourced from params.env, unwired params.env keys, and orphan "
-            "Go os.Getenv calls."
-        ),
-        "reference_doc": f"{REFERENCE_DOC_BASE}/params-env-wiring.md",
-        "exception_policy": _EXCEPTION_POLICY,
-    },
-}
+    }
 
 
 # ─── Repo mappings ─────────────────────────────────────────────────
@@ -146,22 +103,28 @@ def load_repo_mappings(path: str) -> dict[str, tuple[str, str, str]]:
     for entry in mappings:
         repo = entry.get("repo", "")
         jira_component = entry.get("jira_component", "")
-        tier = entry.get("tier", "midstream")
+        tier = entry.get("tier") or "midstream"
         if repo and jira_component:
             catalog_id = jira_component.lower().replace(" ", "-")
             if repo in lookup:
                 existing_tier = lookup[repo][2]
                 existing_prio = _TIER_PRIORITY.get(existing_tier, 99)
                 new_prio = _TIER_PRIORITY.get(tier, 99)
-                kept = existing_tier if existing_prio <= new_prio else tier
+                if new_prio < existing_prio:
+                    replace = True
+                elif new_prio == existing_prio:
+                    # Stable tiebreaker: alphabetically first jira_component
+                    replace = jira_component < lookup[repo][1]
+                else:
+                    replace = False
                 logger.warning(
                     "Duplicate repo mapping for %s (tiers: %s, %s — keeping %s)",
                     repo,
                     existing_tier,
                     tier,
-                    kept,
+                    tier if replace else existing_tier,
                 )
-                if new_prio < existing_prio:
+                if replace:
                     lookup[repo] = (catalog_id, jira_component, tier)
                 continue
             lookup[repo] = (catalog_id, jira_component, tier)
@@ -223,6 +186,12 @@ def _load_repo_reports(reports_dir: str) -> dict[str, dict]:
             logger.warning("Skipping %s: no 'repo' field", json_file.name)
             continue
 
+        if repo_name in reports:
+            logger.warning(
+                "Duplicate repo %s in report files (%s overwrites previous)",
+                repo_name,
+                json_file.name,
+            )
         reports[repo_name] = data
 
     return reports
@@ -275,7 +244,9 @@ def _extract_exception_reasons(findings: list[dict]) -> list[str]:
     return reasons
 
 
-def _aggregate_evaluations(catalog_id: str, comp_data: dict, checked_at: str) -> list[dict]:
+def _aggregate_evaluations(
+    catalog_id: str, comp_data: dict, checked_at: str
+) -> tuple[list[dict], list[dict]]:
     """Build evaluation dicts for one component across all rules."""
     repo_entries = comp_data["repos"]
 
@@ -302,10 +273,10 @@ def _aggregate_evaluations(catalog_id: str, comp_data: dict, checked_at: str) ->
             )
 
     evaluations = []
-    for rule_id, rule_def in RULES.items():
-        rule_entries = all_rules_seen.get(rule_id, [])
-        if not rule_entries:
-            continue
+    rule_defs = []
+    for rule_id in sorted(all_rules_seen.keys()):
+        rule_entries = all_rules_seen[rule_id]
+        rule_def = _build_rule_def(rule_id, rule_entries)
 
         all_passed = all(r["rule_data"].get("passed", True) for r in rule_entries)
         blocker_findings = []
@@ -356,6 +327,14 @@ def _aggregate_evaluations(catalog_id: str, comp_data: dict, checked_at: str) ->
                 loc = _finding_location(repo_name, finding, git_sha=git_sha)
                 if loc:
                     evidence.append(loc)
+                else:
+                    # Findings without a file path still get a repo-level evidence entry
+                    evidence.append(
+                        {
+                            "url": f"{GITHUB_BASE}/{repo_name}",
+                            "label": finding.get("message", repo_name),
+                        }
+                    )
             if evidence:
                 evaluation["evidence"] = evidence
 
@@ -370,8 +349,9 @@ def _aggregate_evaluations(catalog_id: str, comp_data: dict, checked_at: str) ->
             }
 
         evaluations.append(evaluation)
+        rule_defs.append(rule_def)
 
-    return evaluations
+    return evaluations, rule_defs
 
 
 def build_report(
@@ -417,9 +397,13 @@ def build_report(
         )
 
     evaluations = []
+    all_rule_defs: dict[str, dict] = {}
     for catalog_id, comp_data in sorted(component_data.items()):
-        evals = _aggregate_evaluations(catalog_id, comp_data, now)
+        evals, rule_defs = _aggregate_evaluations(catalog_id, comp_data, now)
         evaluations.extend(evals)
+        for rd in rule_defs:
+            if rd["id"] not in all_rule_defs:
+                all_rule_defs[rd["id"]] = rd
 
     source: dict = {
         "tool": "disconnected-readiness-scorer",
@@ -434,7 +418,7 @@ def build_report(
         "repositories": list(repos_catalog.values()),
         "images": [],
         "components": components_catalog,
-        "rules": list(RULES.values()),
+        "rules": list(all_rule_defs.values()),
         "evaluations": evaluations,
     }
 
