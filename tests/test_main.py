@@ -304,6 +304,25 @@ class TestRenderJson:
         assert "files_checked" not in data["rules"][0]
 
 
+class TestRenderJsonRuleMetadata:
+    def test_rule_entries_include_maturity_metadata(self):
+        results = [RuleResult(rule="no-image-tags", passed=True)]
+        report = json.loads(render_json("READY", results, "org/repo"))
+        rule_entry = report["rules"][0]
+        assert rule_entry["display_name"] == "No mutable image tags"
+        assert isinstance(rule_entry["remediation"], str) and rule_entry["remediation"]
+        assert rule_entry["reference_doc"].startswith("https://")
+        assert "no-image-tags" in rule_entry["reference_doc"]
+
+    def test_unknown_rule_omits_metadata_fields(self):
+        results = [RuleResult(rule="unknown-rule", passed=True)]
+        report = json.loads(render_json("READY", results, "org/repo"))
+        rule_entry = report["rules"][0]
+        assert "display_name" not in rule_entry
+        assert "remediation" not in rule_entry
+        assert "reference_doc" not in rule_entry
+
+
 # --- _render_template_simple ---
 
 

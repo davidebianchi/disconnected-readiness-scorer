@@ -112,6 +112,9 @@ RULE_REGISTRY = {
     },
 }
 
+# Reverse lookup: canonical rule name → registry entry
+_RULE_BY_NAME: dict[str, dict] = {v["name"]: v for v in RULE_REGISTRY.values()}
+
 VALID_RULE_NAMES = frozenset(v["name"] for v in RULE_REGISTRY.values())
 VALID_RULE_NAMES_SORTED = sorted(VALID_RULE_NAMES)
 ANY_RULE = "*"
@@ -509,6 +512,13 @@ def render_json(
                 for f in sorted(r.findings, key=lambda f: SEVERITY_ORDER.get(f.severity, 99))
             ],
         }
+        reg = _RULE_BY_NAME.get(r.rule, {})
+        if reg.get("display_name"):
+            rule_entry["display_name"] = reg["display_name"]
+        if reg.get("remediation"):
+            rule_entry["remediation"] = reg["remediation"]
+        if reg.get("reference_doc"):
+            rule_entry["reference_doc"] = reg["reference_doc"]
         if verbose and r.files_checked:
             rule_entry["files_checked"] = sorted(set(r.files_checked))
             if r.scan_filters:
