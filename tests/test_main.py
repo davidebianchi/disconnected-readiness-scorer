@@ -1040,6 +1040,194 @@ class TestApplyExceptions:
         assert results[0].findings[2].severity == "blocker"
         assert results[0].passed is False
 
+    def test_rhoai_mcp_mock_k8s_images_excepted(self):
+        results = [
+            RuleResult(
+                rule="no-image-tags",
+                passed=False,
+                findings=[
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/mock_k8s/cluster_state.py",
+                        183,
+                        "quay.io/modh/odh-minimal-notebook:v2-2024a",
+                        "tagged image",
+                    ),
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/mock_k8s/cluster_state.py",
+                        378,
+                        "quay.io/modh/vllm:latest",
+                        "tagged image",
+                    ),
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/mock_k8s/cluster_state.py",
+                        50,
+                        "quay.io/prod-org/real-app:v1",
+                        "tagged image",
+                    ),
+                ],
+            )
+        ]
+        exceptions = [
+            {
+                "rules": "no-image-tags",
+                "repo": "rhoai-mcp",
+                "paths": ["src/rhoai_mcp/mock_k8s/**"],
+                "images": ["quay.io/modh/*"],
+                "reason": "mock data",
+            }
+        ]
+        apply_exceptions(results, exceptions, "rhoai-mcp")
+        assert results[0].findings[0].severity == "info"
+        assert results[0].findings[1].severity == "info"
+        assert results[0].findings[2].severity == "blocker"
+
+    def test_rhoai_mcp_notebooks_images_excepted(self):
+        results = [
+            RuleResult(
+                rule="no-image-tags",
+                passed=False,
+                findings=[
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/domains/notebooks/client.py",
+                        101,
+                        "image-registry.openshift-image-registry.svc:5000/redhat-ods-applications/jupyter-datascience-notebook:2024.1",
+                        "tagged image",
+                    ),
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/domains/notebooks/client.py",
+                        50,
+                        "quay.io/prod-org/production-notebook:v3",
+                        "tagged image",
+                    ),
+                ],
+            )
+        ]
+        exceptions = [
+            {
+                "rules": "no-image-tags",
+                "repo": "rhoai-mcp",
+                "paths": ["src/rhoai_mcp/domains/notebooks/client.py"],
+                "images": ["image-registry.openshift-image-registry.svc:5000/*"],
+                "reason": "static catalog",
+            }
+        ]
+        apply_exceptions(results, exceptions, "rhoai-mcp")
+        assert results[0].findings[0].severity == "info"
+        assert results[0].findings[1].severity == "blocker"
+
+    def test_rhoai_mcp_training_images_excepted(self):
+        results = [
+            RuleResult(
+                rule="no-image-tags",
+                passed=False,
+                findings=[
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/domains/training/tools/runtimes.py",
+                        179,
+                        "quay.io/modh/training:latest",
+                        "tagged image",
+                    ),
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/domains/training/tools/runtimes.py",
+                        99,
+                        "registry.redhat.io/prod/serving-runtime:v2",
+                        "tagged image",
+                    ),
+                ],
+            )
+        ]
+        exceptions = [
+            {
+                "rules": "no-image-tags",
+                "repo": "rhoai-mcp",
+                "paths": ["src/rhoai_mcp/domains/training/tools/runtimes.py"],
+                "images": ["quay.io/modh/*"],
+                "reason": "fallback images",
+            }
+        ]
+        apply_exceptions(results, exceptions, "rhoai-mcp")
+        assert results[0].findings[0].severity == "info"
+        assert results[0].findings[1].severity == "blocker"
+
+    def test_rhoai_mcp_inference_docstring_images_excepted(self):
+        results = [
+            RuleResult(
+                rule="no-image-tags",
+                passed=False,
+                findings=[
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/domains/inference/tools.py",
+                        118,
+                        "oci://quay.io/org/image:tag",
+                        "OCI URI uses tag",
+                    ),
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/domains/inference/tools.py",
+                        118,
+                        "registry.redhat.io/image:tag",
+                        "tagged image",
+                    ),
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/domains/inference/tools.py",
+                        200,
+                        "quay.io/prod-org/real-model:v1",
+                        "tagged image",
+                    ),
+                ],
+            )
+        ]
+        exceptions = [
+            {
+                "rules": "no-image-tags",
+                "repo": "rhoai-mcp",
+                "paths": ["src/rhoai_mcp/domains/inference/tools.py"],
+                "images": ["oci://quay.io/org/image*", "registry.redhat.io/image*"],
+                "reason": "docstring examples",
+            }
+        ]
+        apply_exceptions(results, exceptions, "rhoai-mcp")
+        assert results[0].findings[0].severity == "info"
+        assert results[0].findings[1].severity == "info"
+        assert results[0].findings[2].severity == "blocker"
+
+    def test_rhoai_mcp_modh_image_outside_mock_stays_blocker(self):
+        results = [
+            RuleResult(
+                rule="no-image-tags",
+                passed=False,
+                findings=[
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/domains/serving/tools.py",
+                        42,
+                        "quay.io/modh/vllm:latest",
+                        "tagged image",
+                    ),
+                ],
+            )
+        ]
+        exceptions = [
+            {
+                "rules": "no-image-tags",
+                "repo": "rhoai-mcp",
+                "paths": ["src/rhoai_mcp/mock_k8s/**"],
+                "images": ["quay.io/modh/*"],
+                "reason": "mock data",
+            }
+        ]
+        apply_exceptions(results, exceptions, "rhoai-mcp")
+        assert results[0].findings[0].severity == "blocker"
+
 
 # --- report sorting ---
 

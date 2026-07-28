@@ -607,6 +607,8 @@ exceptions:
     repo: rhoai-mcp
     paths:
       - "src/rhoai_mcp/mock_k8s/**"
+    images:
+      - "quay.io/modh/*"
     reason: "Mock cluster state — synthetic K8s resource fixtures for --mock-cluster mode, never pulled or deployed"
 
   # Notebook image catalog — static fallback list shown to users
@@ -616,6 +618,8 @@ exceptions:
     repo: rhoai-mcp
     paths:
       - "src/rhoai_mcp/domains/notebooks/client.py"
+    images:
+      - "image-registry.openshift-image-registry.svc:5000/*"
     reason: "Static notebook image catalog for display — fallback list returned when ImageStream querying is unavailable, not an operator deployment manifest"
 
   # Training runtime tool defaults — client-side fallback images for ClusterTrainingRuntime creation
@@ -625,6 +629,8 @@ exceptions:
     repo: rhoai-mcp
     paths:
       - "src/rhoai_mcp/domains/training/tools/runtimes.py"
+    images:
+      - "quay.io/modh/*"
     reason: "Client-side fallback images for runtime creation tool — the operator that reconciles the resulting CR is responsible for RELATED_IMAGE_* injection in disconnected clusters"
 
   # Inference tool docstring — example URIs in function documentation
@@ -634,6 +640,9 @@ exceptions:
     repo: rhoai-mcp
     paths:
       - "src/rhoai_mcp/domains/inference/tools.py"
+    images:
+      - "oci://quay.io/org/image*"
+      - "registry.redhat.io/image*"
     reason: "Example URIs in docstring Args documentation (oci:// and docker:// examples) — not executable code"
 
   # Storage helper CLI suggestion — instructional oc run command printed as guidance text
