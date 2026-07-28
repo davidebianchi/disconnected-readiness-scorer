@@ -641,8 +641,8 @@ exceptions:
     paths:
       - "src/rhoai_mcp/domains/inference/tools.py"
     images:
-      - "oci://quay.io/org/image*"
-      - "registry.redhat.io/image*"
+      - "oci://quay.io/org/image[:@]*"
+      - "registry.redhat.io/image[:@]*"
     reason: "Example URIs in docstring Args documentation (oci:// and docker:// examples) — not executable code"
 
   # Storage helper CLI suggestion — instructional oc run command printed as guidance text
