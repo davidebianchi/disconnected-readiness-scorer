@@ -594,3 +594,55 @@ exceptions:
       - "ghcr.io/modelcontextprotocol/servers/github:*"
       - "custom-registry.io/my-mcp-server:*"
     reason: "CRD OpenAPI description examples in checked-in MCPLO operand manifests — documentation only, not deployed"
+
+  # --- rhoai-mcp ---
+  # rhoai-mcp is an MCP server (AI agent tool layer), not a Kubernetes operator.
+  # It never deploys images — all image references are mock data, fallback
+  # defaults for display, or documentation examples.
+
+  # Mock cluster state — synthetic K8s resources for --mock-cluster mode (testing/demos)
+  - rules:
+      - image-manifest-complete
+      - no-image-tags
+    repo: rhoai-mcp
+    paths:
+      - "src/rhoai_mcp/mock_k8s/**"
+    reason: "Mock cluster state — synthetic K8s resource fixtures for --mock-cluster mode, never pulled or deployed"
+
+  # Notebook image catalog — static fallback list shown to users
+  - rules:
+      - image-manifest-complete
+      - no-image-tags
+    repo: rhoai-mcp
+    paths:
+      - "src/rhoai_mcp/domains/notebooks/client.py"
+    reason: "Static notebook image catalog for display — fallback list returned when ImageStream querying is unavailable, not an operator deployment manifest"
+
+  # Training runtime tool defaults — client-side fallback images for ClusterTrainingRuntime creation
+  - rules:
+      - image-manifest-complete
+      - no-image-tags
+    repo: rhoai-mcp
+    paths:
+      - "src/rhoai_mcp/domains/training/tools/runtimes.py"
+    reason: "Client-side fallback images for runtime creation tool — the operator that reconciles the resulting CR is responsible for RELATED_IMAGE_* injection in disconnected clusters"
+
+  # Inference tool docstring — example URIs in function documentation
+  - rules:
+      - image-manifest-complete
+      - no-image-tags
+    repo: rhoai-mcp
+    paths:
+      - "src/rhoai_mcp/domains/inference/tools.py"
+    reason: "Example URIs in docstring Args documentation (oci:// and docker:// examples) — not executable code"
+
+  # Storage helper CLI suggestion — instructional oc run command printed as guidance text
+  - rules:
+      - image-manifest-complete
+      - no-image-tags
+    repo: rhoai-mcp
+    paths:
+      - "src/rhoai_mcp/composites/training/storage.py"
+    images:
+      - "registry.access.redhat.com/ubi9/ubi*"
+    reason: "Image reference inside a suggested 'oc run' command printed as guidance text — never executed by the MCP server"
