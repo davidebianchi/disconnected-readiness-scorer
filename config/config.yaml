@@ -607,6 +607,7 @@ exceptions:
     repo: rhoai-mcp
     paths:
       - "src/rhoai_mcp/mock_k8s/**"
+      - "evals/mock_k8s/**"
     images:
       - "quay.io/modh/*"
     reason: "Mock cluster state — synthetic K8s resource fixtures for --mock-cluster mode, never pulled or deployed"

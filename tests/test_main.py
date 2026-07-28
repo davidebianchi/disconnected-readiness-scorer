@@ -1071,6 +1071,14 @@ class TestApplyExceptions:
                         "quay.io/modh/vllm:latest",
                         "tagged image",
                     ),
+                    # evals/mock_k8s — same mock fixtures, different path
+                    Finding(
+                        "blocker",
+                        "evals/mock_k8s/cluster_state.py",
+                        183,
+                        "quay.io/modh/odh-minimal-notebook:v2-2024a",
+                        "tagged image",
+                    ),
                     # wrong image org — stays blocker
                     Finding(
                         "blocker",
@@ -1093,8 +1101,9 @@ class TestApplyExceptions:
         apply_exceptions(results, rhoai_mcp_exceptions, "rhoai-mcp")
         assert results[0].findings[0].severity == "info"
         assert results[0].findings[1].severity == "info"
-        assert results[0].findings[2].severity == "blocker"
+        assert results[0].findings[2].severity == "info"
         assert results[0].findings[3].severity == "blocker"
+        assert results[0].findings[4].severity == "blocker"
 
     @pytest.mark.parametrize("rule", ["no-image-tags", "image-manifest-complete"])
     def test_rhoai_mcp_notebooks_matched(self, rhoai_mcp_exceptions, rule):
