@@ -1040,6 +1040,259 @@ class TestApplyExceptions:
         assert results[0].findings[2].severity == "blocker"
         assert results[0].passed is False
 
+    # --- rhoai-mcp: loaded from production config/config.yaml ---
+
+    @pytest.fixture()
+    def rhoai_mcp_exceptions(self):
+        cfg_path = str(Path(__file__).parent.parent / "config" / "config.yaml")
+        all_exc = load_exceptions(cfg_path)
+        exc = [e for e in all_exc if isinstance(e, dict) and e.get("repo") == "rhoai-mcp"]
+        assert len(exc) == 5, f"expected 5 rhoai-mcp exception groups, got {len(exc)}"
+        return exc
+
+    @pytest.mark.parametrize("rule", ["no-image-tags", "image-manifest-complete"])
+    def test_rhoai_mcp_mock_k8s_matched(self, rhoai_mcp_exceptions, rule):
+        results = [
+            RuleResult(
+                rule=rule,
+                passed=False,
+                findings=[
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/mock_k8s/cluster_state.py",
+                        183,
+                        "quay.io/modh/odh-minimal-notebook:v2-2024a",
+                        "tagged image",
+                    ),
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/mock_k8s/cluster_state.py",
+                        378,
+                        "quay.io/modh/vllm:latest",
+                        "tagged image",
+                    ),
+                    # evals/mock_k8s — same mock fixtures, different path
+                    Finding(
+                        "blocker",
+                        "evals/mock_k8s/cluster_state.py",
+                        183,
+                        "quay.io/modh/odh-minimal-notebook:v2-2024a",
+                        "tagged image",
+                    ),
+                    # wrong image org — stays blocker
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/mock_k8s/cluster_state.py",
+                        50,
+                        "quay.io/prod-org/real-app:v1",
+                        "tagged image",
+                    ),
+                    # right image, wrong path — stays blocker
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/domains/serving/tools.py",
+                        42,
+                        "quay.io/modh/vllm:latest",
+                        "tagged image",
+                    ),
+                ],
+            )
+        ]
+        apply_exceptions(results, rhoai_mcp_exceptions, "rhoai-mcp")
+        assert results[0].findings[0].severity == "info"
+        assert results[0].findings[1].severity == "info"
+        assert results[0].findings[2].severity == "info"
+        assert results[0].findings[3].severity == "blocker"
+        assert results[0].findings[4].severity == "blocker"
+
+    @pytest.mark.parametrize("rule", ["no-image-tags", "image-manifest-complete"])
+    def test_rhoai_mcp_notebooks_matched(self, rhoai_mcp_exceptions, rule):
+        results = [
+            RuleResult(
+                rule=rule,
+                passed=False,
+                findings=[
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/domains/notebooks/client.py",
+                        101,
+                        "image-registry.openshift-image-registry.svc:5000/redhat-ods-applications/jupyter-datascience-notebook:2024.1",
+                        "tagged image",
+                    ),
+                    # different registry — stays blocker
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/domains/notebooks/client.py",
+                        50,
+                        "quay.io/prod-org/production-notebook:v3",
+                        "tagged image",
+                    ),
+                ],
+            )
+        ]
+        apply_exceptions(results, rhoai_mcp_exceptions, "rhoai-mcp")
+        assert results[0].findings[0].severity == "info"
+        assert results[0].findings[1].severity == "blocker"
+
+    @pytest.mark.parametrize("rule", ["no-image-tags", "image-manifest-complete"])
+    def test_rhoai_mcp_training_matched(self, rhoai_mcp_exceptions, rule):
+        results = [
+            RuleResult(
+                rule=rule,
+                passed=False,
+                findings=[
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/domains/training/tools/runtimes.py",
+                        179,
+                        "quay.io/modh/training:latest",
+                        "tagged image",
+                    ),
+                    # different org — stays blocker
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/domains/training/tools/runtimes.py",
+                        99,
+                        "registry.redhat.io/prod/serving-runtime:v2",
+                        "tagged image",
+                    ),
+                ],
+            )
+        ]
+        apply_exceptions(results, rhoai_mcp_exceptions, "rhoai-mcp")
+        assert results[0].findings[0].severity == "info"
+        assert results[0].findings[1].severity == "blocker"
+
+    @pytest.mark.parametrize("rule", ["no-image-tags", "image-manifest-complete"])
+    def test_rhoai_mcp_inference_docstring_matched(self, rhoai_mcp_exceptions, rule):
+        results = [
+            RuleResult(
+                rule=rule,
+                passed=False,
+                findings=[
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/domains/inference/tools.py",
+                        118,
+                        "oci://quay.io/org/image:tag",
+                        "OCI URI uses tag",
+                    ),
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/domains/inference/tools.py",
+                        118,
+                        "registry.redhat.io/image:tag",
+                        "tagged image",
+                    ),
+                    # unrelated image — stays blocker
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/domains/inference/tools.py",
+                        200,
+                        "quay.io/prod-org/real-model:v1",
+                        "tagged image",
+                    ),
+                    # sibling name image-prod — stays blocker ([:@] constraint)
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/domains/inference/tools.py",
+                        130,
+                        "oci://quay.io/org/image-prod:v2",
+                        "OCI URI uses tag",
+                    ),
+                    # sibling name image-builder — stays blocker ([:@] constraint)
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/domains/inference/tools.py",
+                        135,
+                        "registry.redhat.io/image-builder:latest",
+                        "tagged image",
+                    ),
+                ],
+            )
+        ]
+        apply_exceptions(results, rhoai_mcp_exceptions, "rhoai-mcp")
+        assert results[0].findings[0].severity == "info"
+        assert results[0].findings[1].severity == "info"
+        assert results[0].findings[2].severity == "blocker"
+        assert results[0].findings[3].severity == "blocker"
+        assert results[0].findings[4].severity == "blocker"
+
+    @pytest.mark.parametrize("rule", ["no-image-tags", "image-manifest-complete"])
+    def test_rhoai_mcp_storage_helper_matched(self, rhoai_mcp_exceptions, rule):
+        results = [
+            RuleResult(
+                rule=rule,
+                passed=False,
+                findings=[
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/composites/training/storage.py",
+                        55,
+                        "registry.access.redhat.com/ubi9/ubi:latest",
+                        "tagged image",
+                    ),
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/composites/training/storage.py",
+                        60,
+                        "registry.access.redhat.com/ubi9/ubi-minimal:9.4",
+                        "tagged image",
+                    ),
+                    # different registry path — stays blocker
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/composites/training/storage.py",
+                        70,
+                        "quay.io/some-org/ubi9:v1",
+                        "tagged image",
+                    ),
+                ],
+            )
+        ]
+        apply_exceptions(results, rhoai_mcp_exceptions, "rhoai-mcp")
+        assert results[0].findings[0].severity == "info"
+        assert results[0].findings[1].severity == "info"
+        assert results[0].findings[2].severity == "blocker"
+
+    def test_rhoai_mcp_wrong_repo_keeps_all_blockers(self, rhoai_mcp_exceptions):
+        results = [
+            RuleResult(
+                rule="no-image-tags",
+                passed=False,
+                findings=[
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/mock_k8s/cluster_state.py",
+                        10,
+                        "quay.io/modh/notebook:latest",
+                        "tagged image",
+                    ),
+                ],
+            )
+        ]
+        apply_exceptions(results, rhoai_mcp_exceptions, "some-other-repo")
+        assert results[0].findings[0].severity == "blocker"
+
+    def test_rhoai_mcp_unrelated_rule_not_excepted(self, rhoai_mcp_exceptions):
+        results = [
+            RuleResult(
+                rule="no-runtime-egress",
+                passed=False,
+                findings=[
+                    Finding(
+                        "blocker",
+                        "src/rhoai_mcp/mock_k8s/cluster_state.py",
+                        10,
+                        "quay.io/modh/notebook:latest",
+                        "egress call",
+                    ),
+                ],
+            )
+        ]
+        apply_exceptions(results, rhoai_mcp_exceptions, "rhoai-mcp")
+        assert results[0].findings[0].severity == "blocker"
+
 
 # --- report sorting ---
 
