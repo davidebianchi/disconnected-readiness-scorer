@@ -45,6 +45,14 @@ def main() -> int:
     except Exception:
         return 0
 
+    if "mappings" not in upstream:
+        # Response is not the expected format (e.g. GitHub contents-API envelope)
+        print(
+            "Warning: upstream response has no 'mappings' key — cannot verify staleness",
+            file=sys.stderr,
+        )
+        return 0
+
     local_mappings = {json.dumps(m, sort_keys=True) for m in local.get("mappings", [])}
     upstream_mappings = {json.dumps(m, sort_keys=True) for m in upstream.get("mappings", [])}
 
