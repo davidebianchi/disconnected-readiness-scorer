@@ -13,6 +13,12 @@
       "tier": "upstream"
     },
     {
+      "repo": "NVIDIA/OpenShell",
+      "jira_project": "RHAIENG",
+      "jira_component": "AgentOps",
+      "tier": "upstream"
+    },
+    {
       "repo": "SeldonIO/MLServer",
       "jira_project": "RHOAIENG",
       "jira_component": "Model Runtimes",
@@ -82,12 +88,6 @@
       "repo": "google/ml-metadata",
       "jira_project": "RHOAIENG",
       "jira_component": "AI Pipelines",
-      "tier": "upstream"
-    },
-    {
-      "repo": "kagenti/kagenti-operator",
-      "jira_project": "RHAIENG",
-      "jira_component": "AgentOps",
       "tier": "upstream"
     },
     {
@@ -1232,6 +1232,12 @@
       "tier": "midstream"
     },
     {
+      "repo": "opendatahub-io/openshell",
+      "jira_project": "RHAIENG",
+      "jira_component": "AgentOps",
+      "tier": "midstream"
+    },
+    {
       "repo": "opendatahub-io/openvino",
       "jira_project": "RHOAIENG",
       "jira_component": "Model Runtimes",
@@ -1319,6 +1325,18 @@
       "repo": "opendatahub-io/ray-module-operator",
       "jira_project": "RHOAIENG",
       "jira_component": "KubeRay",
+      "tier": "midstream"
+    },
+    {
+      "repo": "opendatahub-io/release-planner-quality-gate",
+      "jira_project": "RHAIFIRST",
+      "jira_component": "Work Item creation",
+      "tier": "midstream"
+    },
+    {
+      "repo": "opendatahub-io/renovate-config",
+      "jira_project": "AIPCC",
+      "jira_component": "AIPCC Productization",
       "tier": "midstream"
     },
     {
@@ -1922,6 +1940,12 @@
       "tier": "downstream"
     },
     {
+      "repo": "red-hat-data-services/openshell",
+      "jira_project": "RHAIENG",
+      "jira_component": "AgentOps",
+      "tier": "downstream"
+    },
+    {
       "repo": "red-hat-data-services/openvino",
       "jira_project": "RHOAIENG",
       "jira_component": "Model Runtimes",
@@ -2042,6 +2066,12 @@
       "tier": "upstream"
     },
     {
+      "repo": "rossoctl/operator",
+      "jira_project": "RHAIENG",
+      "jira_component": "AgentOps",
+      "tier": "upstream"
+    },
+    {
       "repo": "triton-inference-server/client",
       "jira_project": "RHOAIENG",
       "jira_component": "Model Runtimes",
@@ -2133,7 +2163,7 @@
     }
   ],
   "lifecycle": {
-    "last_updated": "2026-07-16T13:42:48.176465+00:00",
+    "last_updated": "2026-07-28T16:52:16.195406+00:00",
     "source": "https://github.com/opendatahub-io/software-catalog"
   }
 }

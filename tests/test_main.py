@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from main import (
+    RULE_REGISTRY,
     ArchAnalyzerError,
     _build_exception_snippets,
     _build_exceptions_section,
@@ -2318,3 +2319,27 @@ class TestExpiredExceptions:
             )
         )
         assert "expired_exceptions" not in data
+
+
+class TestRuleRegistryMetadata:
+    def test_component_rules_have_maturity_fields(self):
+        for alias, entry in RULE_REGISTRY.items():
+            if entry.get("is_manifest_rule"):
+                continue
+            for key in ("display_name", "remediation", "reference_doc"):
+                assert key in entry, f"Rule {alias} missing {key}"
+                assert isinstance(entry[key], str) and entry[key]
+
+    def test_component_rules_reference_doc_is_absolute(self):
+        for alias, entry in RULE_REGISTRY.items():
+            if entry.get("is_manifest_rule"):
+                continue
+            assert entry["reference_doc"].startswith("https://"), (
+                f"Rule {alias} reference_doc not absolute: {entry['reference_doc']}"
+            )
+
+    def test_manifest_rules_have_no_maturity_fields(self):
+        for alias, entry in RULE_REGISTRY.items():
+            if entry.get("is_manifest_rule"):
+                for key in ("display_name", "remediation", "reference_doc"):
+                    assert key not in entry, f"Manifest rule {alias} should not have {key}"

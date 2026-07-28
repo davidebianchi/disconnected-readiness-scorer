@@ -34,34 +34,81 @@ class ArchAnalyzerError(Exception):
 CENTRAL_CONFIG_PATH = "config/config.yaml"
 _EXPIRY_WARNING_DAYS = 14
 
+REFERENCE_DOC_BASE = (
+    "https://github.com/opendatahub-io/disconnected-readiness-scorer/blob/main/docs/references"
+)
+
 RULE_REGISTRY = {
     "csv": {
         "module": "rules.image_manifest_complete",
         "name": "image-manifest-complete",
         "needs_manifest": True,
+        "display_name": "Image manifest completeness",
+        "remediation": (
+            "Register all container images used by this component in the "
+            "operator manifest. For repos using the env-var pattern, add a "
+            "RELATED_IMAGE_* environment variable to the operator deployment. "
+            "For repos using the params.env pattern, add a key to params.env "
+            "and wire it through kustomize."
+        ),
+        "reference_doc": f"{REFERENCE_DOC_BASE}/image-manifest-complete.md",
     },
     "tags": {
         "module": "rules.no_image_tags",
         "name": "no-image-tags",
         "needs_manifest": True,
+        "display_name": "No mutable image tags",
+        "remediation": (
+            "Replace all mutable image tags (:latest, :v1.2, etc.) with "
+            "immutable @sha256: digest references. Mutable tags can resolve "
+            "to different images over time and cannot be pre-pulled reliably "
+            "for disconnected deployments."
+        ),
+        "reference_doc": f"{REFERENCE_DOC_BASE}/no-image-tags.md",
     },
     "egress": {
         "module": "rules.no_runtime_egress",
         "name": "no-runtime-egress",
+        "display_name": "No runtime external calls",
+        "remediation": (
+            "Remove hardcoded external URLs from source code and manifests, "
+            "or make them configurable via environment variables or "
+            "configuration files. In a disconnected cluster, any outbound "
+            "network call to an external service will fail."
+        ),
+        "reference_doc": f"{REFERENCE_DOC_BASE}/no-runtime-egress.md",
     },
     "python": {
         "module": "rules.python_imports",
         "name": "python-imports-bundled",
+        "display_name": "Python imports bundled",
+        "remediation": (
+            "Ensure all Python package dependencies are included in the "
+            "offline-bundled package set or vendored into the container "
+            "image at build time. Runtime pip install calls will fail "
+            "without network access."
+        ),
+        "reference_doc": f"{REFERENCE_DOC_BASE}/python-imports-bundled.md",
     },
     "params_env": {
         "module": "rules.params_env",
         "name": "params-env-wiring",
         "needs_manifest": True,
+        "display_name": "Params.env wiring",
+        "remediation": (
+            "Complete the params.env wiring chain: every image reference "
+            "must flow from params.env through a kustomize configMapGenerator "
+            "into the rendered manifests. Check for hardcoded images not "
+            "sourced from params.env, unwired params.env keys, and orphan "
+            "Go os.Getenv calls."
+        ),
+        "reference_doc": f"{REFERENCE_DOC_BASE}/params-env-wiring.md",
     },
     "manifest": {
         "module": "rules.operator_manifest",
         "name": "operator-manifest",
         "is_manifest_rule": True,
+        # No display_name/remediation/reference_doc — manifest rules don't produce maturity evaluations
     },
 }
 
