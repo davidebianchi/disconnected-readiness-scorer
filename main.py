@@ -150,7 +150,7 @@ def _validate_exceptions(exceptions, config_path):
                 "must include at least one of 'paths', 'images', or 'message'"
             )
         expires = exc.get("expires")
-        if expires is not None and not isinstance(expires, (str, date)):
+        if expires is not None and not isinstance(expires, str | date):
             raise ValueError(
                 f"Exception entry {i + 1} (rules={rules!r}) "
                 f"in {config_path}: 'expires' must be a YYYY-MM-DD date string, "
