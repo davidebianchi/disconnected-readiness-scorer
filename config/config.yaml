@@ -523,7 +523,14 @@ exceptions:
     reason: "Local development convenience overlay — not referenced by production kustomize overlays; KServe is deployed separately by the opendatahub-operator KServe module"
 
   # --- mlflow-operator ---
-  # (no repo-specific exceptions)
+  - rules: params-env-wiring
+    repo: mlflow-operator
+    paths:
+      - "config/base"
+      - "config/manager"
+    images:
+      - "localhost/mlflow-operator:*"
+    reason: "Base/manager use a localhost CI/dev placeholder; production overlays (odh/rhoai/openshift) replace the controller image from params.env MLFLOW_OPERATOR_IMAGE"
 
   # --- spark-operator ---
   # (no repo-specific exceptions)
