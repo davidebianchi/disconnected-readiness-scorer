@@ -656,3 +656,19 @@ exceptions:
     images:
       - "registry.access.redhat.com/ubi9/ubi*"
     reason: "Image reference inside a suggested 'oc run' command printed as guidance text — never executed by the MCP server"
+
+  # --- trainer-operator ---
+  - rules:
+      - image-manifest-complete
+      - no-image-tags
+    repo: trainer-operator
+    paths:
+      - "manifests/trainer/base/runtimes/**"
+    reason: "Upstream Kubeflow Trainer default runtimes — RHOAI deploys exclusively from manifests/trainer/rhoai/ (operator SourcePath hardcoded to 'rhoai'). Community images (ghcr.io/kubeflow/trainer, pytorch/pytorch) are never used in production."
+
+  - rules: image-manifest-complete
+    repo: trainer-operator
+    paths:
+      - "manifests/trainer/overlays/kubeflow-platform/**"
+      - "manifests/trainer/overlays/runtimes/**"
+    reason: "Upstream Kubeflow community overlays — only used by the kubeflow-platform deployment path, not by RHOAI (operator uses manifests/trainer/rhoai/ directly)"
