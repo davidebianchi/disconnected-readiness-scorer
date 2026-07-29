@@ -1310,6 +1310,12 @@
       "tier": "midstream"
     },
     {
+      "repo": "opendatahub-io/praxis-extproc",
+      "jira_project": "RHOAIENG",
+      "jira_component": "AI Gateway",
+      "tier": "midstream"
+    },
+    {
       "repo": "opendatahub-io/python-package-skills",
       "jira_project": "RHAIFIRST",
       "jira_component": "Skills registry",
@@ -2163,7 +2169,7 @@
     }
   ],
   "lifecycle": {
-    "last_updated": "2026-07-28T16:52:16.195406+00:00",
+    "last_updated": "2026-07-29T16:43:15.865464+00:00",
     "source": "https://github.com/opendatahub-io/software-catalog"
   }
 }
