@@ -27,10 +27,10 @@ class TestRepoMappings:
         path = tmp_path / "repo_mappings.json"
 
         _write_repo_mappings(path, entries)
-        winner_forward = load_repo_mappings(str(path))["org/repo"][1]
+        winner_forward = load_repo_mappings(str(path))["org/repo"][0].jira_component
 
         _write_repo_mappings(path, list(reversed(entries)))
-        winner_reversed = load_repo_mappings(str(path))["org/repo"][1]
+        winner_reversed = load_repo_mappings(str(path))["org/repo"][0].jira_component
 
         assert winner_forward == winner_reversed
 
@@ -40,7 +40,7 @@ class TestRepoMappings:
         path.write_text(
             json.dumps({"mappings": [{"repo": "org/repo", "jira_component": "Comp", "tier": None}]})
         )
-        assert load_repo_mappings(str(path))["org/repo"][2] == "midstream"
+        assert load_repo_mappings(str(path))["org/repo"][0].tier == "midstream"
 
 
 class TestEvidence:

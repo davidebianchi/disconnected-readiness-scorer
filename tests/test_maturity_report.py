@@ -136,10 +136,12 @@ class TestRepoMappings:
 
         lookup = load_repo_mappings(str(path))
         assert "opendatahub-io/odh-dashboard" in lookup
-        catalog_id, name, tier = lookup["opendatahub-io/odh-dashboard"]
-        assert catalog_id == "ai-core-dashboard"
-        assert name == "AI Core Dashboard"
-        assert tier == "midstream"
+        mappings = lookup["opendatahub-io/odh-dashboard"]
+        assert len(mappings) == 1
+        assert mappings[0].catalog_id == "ai-core-dashboard"
+        assert mappings[0].jira_component == "AI Core Dashboard"
+        assert mappings[0].tier == "midstream"
+        assert mappings[0].path == ""
 
     def test_catalog_id_derivation(self, tmp_path):
         path = tmp_path / "repo_mappings.json"
@@ -151,7 +153,7 @@ class TestRepoMappings:
         )
 
         lookup = load_repo_mappings(str(path))
-        assert lookup["org/repo"][0] == "model-as-a-service"
+        assert lookup["org/repo"][0].catalog_id == "model-as-a-service"
 
     def test_missing_file_returns_empty(self, tmp_path):
         lookup = load_repo_mappings(str(tmp_path / "nonexistent.json"))
@@ -164,7 +166,7 @@ class TestRepoMappings:
         assert lookup == {}
 
     def test_duplicate_repo_prefers_midstream_over_upstream(self, tmp_path):
-        """When the same repo appears at midstream and upstream, midstream wins."""
+        """When the same repo+path appears at midstream and upstream, midstream wins."""
         path = tmp_path / "repo_mappings.json"
         _write_repo_mappings(
             path,
@@ -175,7 +177,8 @@ class TestRepoMappings:
         )
 
         lookup = load_repo_mappings(str(path))
-        assert lookup["org/repo"][2] == "midstream"
+        assert len(lookup["org/repo"]) == 1
+        assert lookup["org/repo"][0].tier == "midstream"
 
     def test_duplicate_repo_prefers_higher_priority_tier(self, tmp_path):
         """When upstream appears first but midstream second, midstream still wins."""
@@ -189,7 +192,8 @@ class TestRepoMappings:
         )
 
         lookup = load_repo_mappings(str(path))
-        assert lookup["org/repo"][2] == "midstream"
+        assert len(lookup["org/repo"]) == 1
+        assert lookup["org/repo"][0].tier == "midstream"
 
     def test_duplicate_repo_prefers_downstream(self, tmp_path):
         """Downstream beats midstream and upstream."""
@@ -203,7 +207,54 @@ class TestRepoMappings:
         )
 
         lookup = load_repo_mappings(str(path))
-        assert lookup["org/repo"][2] == "downstream"
+        assert len(lookup["org/repo"]) == 1
+        assert lookup["org/repo"][0].tier == "downstream"
+
+    def test_path_scoped_entries_preserved(self, tmp_path):
+        """Path-scoped entries for the same repo are all preserved."""
+        path = tmp_path / "repo_mappings.json"
+        _write_repo_mappings(
+            path,
+            [
+                {"repo": "org/operator", "jira_component": "Platform", "tier": "midstream"},
+                {
+                    "repo": "org/operator",
+                    "jira_component": "Model Serving",
+                    "tier": "midstream",
+                    "path": "modules/kserve",
+                },
+                {
+                    "repo": "org/operator",
+                    "jira_component": "AI Pipelines",
+                    "tier": "midstream",
+                    "path": "modules/pipelines",
+                },
+            ],
+        )
+        lookup = load_repo_mappings(str(path))
+        mappings = lookup["org/operator"]
+        assert len(mappings) == 3
+        catalog_ids = {m.catalog_id for m in mappings}
+        assert catalog_ids == {"platform", "model-serving", "ai-pipelines"}
+
+    def test_path_scoped_entries_have_path_field(self, tmp_path):
+        """Each RepoMapping includes its path."""
+        path = tmp_path / "repo_mappings.json"
+        _write_repo_mappings(
+            path,
+            [
+                {"repo": "org/repo", "jira_component": "Default", "tier": "midstream"},
+                {
+                    "repo": "org/repo",
+                    "jira_component": "Sub",
+                    "tier": "midstream",
+                    "path": "src/sub",
+                },
+            ],
+        )
+        lookup = load_repo_mappings(str(path))
+        paths = {m.path for m in lookup["org/repo"]}
+        assert paths == {"", "src/sub"}
 
 
 # ─── 3. Finding locations ──────────────────────────────────────────
@@ -712,6 +763,278 @@ class TestDataDrivenRuleDiscovery:
         assert (
             rule_defs["brand-new-rule"]["reference_doc"] == "https://example.com/brand-new-rule.md"
         )
+
+
+# ─── Path-scoped routing ───────────────────────────────────────────
+
+
+class TestPathScopedRouting:
+    """Findings from repos with path-scoped mappings are routed to the correct component."""
+
+    def test_findings_routed_to_path_scoped_component(self, tmp_path):
+        """A finding in modules/kserve/ goes to model-serving, not platform."""
+        reports_dir = tmp_path / "reports"
+        reports_dir.mkdir()
+        rules = [
+            {
+                "name": "no-image-tags",
+                "passed": False,
+                "blockers": 1,
+                "infos": 0,
+                "findings": [
+                    {
+                        "severity": "blocker",
+                        "file": "modules/kserve/config.yaml",
+                        "line": 5,
+                        "image": "quay.io/org/img:latest",
+                        "message": "Mutable tag",
+                    },
+                ],
+            },
+        ]
+        _write_repo_report(reports_dir, "org/operator", rules, score="NOT READY")
+
+        mappings_path = tmp_path / "mappings.json"
+        _write_repo_mappings(
+            mappings_path,
+            [
+                {"repo": "org/operator", "jira_component": "Platform", "tier": "midstream"},
+                {
+                    "repo": "org/operator",
+                    "jira_component": "Model Serving",
+                    "tier": "midstream",
+                    "path": "modules/kserve",
+                },
+            ],
+        )
+
+        report = build_report(str(reports_dir), str(mappings_path), "", "1.0.0")
+        # Finding should route to model-serving
+        ms_evals = [e for e in report["evaluations"] if e["component_id"] == "model-serving"]
+        ms_tags = next((e for e in ms_evals if e["rule_id"] == "no-image-tags"), None)
+        assert ms_tags is not None
+        assert ms_tags["status"] == "unmet"
+
+        # Platform component should have no blocker for this rule
+        pf_evals = [e for e in report["evaluations"] if e["component_id"] == "platform"]
+        pf_tags = next((e for e in pf_evals if e["rule_id"] == "no-image-tags"), None)
+        assert pf_tags is not None
+        assert pf_tags["status"] == "met"
+
+    def test_unmatched_finding_goes_to_default_component(self, tmp_path):
+        """A finding in an unmapped path goes to the default (pathless) component."""
+        reports_dir = tmp_path / "reports"
+        reports_dir.mkdir()
+        rules = [
+            {
+                "name": "no-image-tags",
+                "passed": False,
+                "blockers": 1,
+                "infos": 0,
+                "findings": [
+                    {
+                        "severity": "blocker",
+                        "file": "pkg/util/helper.go",
+                        "line": 10,
+                        "image": "quay.io/org/img:v1",
+                        "message": "Mutable tag",
+                    },
+                ],
+            },
+        ]
+        _write_repo_report(reports_dir, "org/operator", rules, score="NOT READY")
+
+        mappings_path = tmp_path / "mappings.json"
+        _write_repo_mappings(
+            mappings_path,
+            [
+                {"repo": "org/operator", "jira_component": "Platform", "tier": "midstream"},
+                {
+                    "repo": "org/operator",
+                    "jira_component": "Model Serving",
+                    "tier": "midstream",
+                    "path": "modules/kserve",
+                },
+            ],
+        )
+
+        report = build_report(str(reports_dir), str(mappings_path), "", "1.0.0")
+        pf_evals = [e for e in report["evaluations"] if e["component_id"] == "platform"]
+        pf_tags = next(e for e in pf_evals if e["rule_id"] == "no-image-tags")
+        assert pf_tags["status"] == "unmet"
+
+    def test_longest_prefix_wins(self, tmp_path):
+        """When multiple paths match, longest prefix wins."""
+        reports_dir = tmp_path / "reports"
+        reports_dir.mkdir()
+        rules = [
+            {
+                "name": "no-image-tags",
+                "passed": False,
+                "blockers": 1,
+                "infos": 0,
+                "findings": [
+                    {
+                        "severity": "blocker",
+                        "file": "modules/kserve/internal/config.yaml",
+                        "line": 1,
+                        "image": "quay.io/org/img:v1",
+                        "message": "Mutable tag",
+                    },
+                ],
+            },
+        ]
+        _write_repo_report(reports_dir, "org/operator", rules, score="NOT READY")
+
+        mappings_path = tmp_path / "mappings.json"
+        _write_repo_mappings(
+            mappings_path,
+            [
+                {"repo": "org/operator", "jira_component": "Platform", "tier": "midstream"},
+                {
+                    "repo": "org/operator",
+                    "jira_component": "Modules",
+                    "tier": "midstream",
+                    "path": "modules",
+                },
+                {
+                    "repo": "org/operator",
+                    "jira_component": "Model Serving",
+                    "tier": "midstream",
+                    "path": "modules/kserve",
+                },
+            ],
+        )
+
+        report = build_report(str(reports_dir), str(mappings_path), "", "1.0.0")
+        ms_evals = [e for e in report["evaluations"] if e["component_id"] == "model-serving"]
+        ms_tags = next(e for e in ms_evals if e["rule_id"] == "no-image-tags")
+        assert ms_tags["status"] == "unmet"
+
+        mod_evals = [e for e in report["evaluations"] if e["component_id"] == "modules"]
+        mod_tags = next(e for e in mod_evals if e["rule_id"] == "no-image-tags")
+        assert mod_tags["status"] == "met"
+
+    def test_repo_without_path_mappings_unchanged(self, tmp_path):
+        """Repos with only pathless mappings work exactly as before."""
+        reports_dir = tmp_path / "reports"
+        reports_dir.mkdir()
+        _write_repo_report(reports_dir, "org/simple-repo", FAILING_RULES, score="NOT READY")
+
+        mappings_path = tmp_path / "mappings.json"
+        _write_repo_mappings(
+            mappings_path,
+            [{"repo": "org/simple-repo", "jira_component": "Test", "tier": "midstream"}],
+        )
+
+        report = build_report(str(reports_dir), str(mappings_path), "", "1.0.0")
+        test_evals = [e for e in report["evaluations"] if e["component_id"] == "test"]
+        tags = next(e for e in test_evals if e["rule_id"] == "no-image-tags")
+        assert tags["status"] == "unmet"
+
+    def test_component_catalog_includes_repo_in_multiple_components(self, tmp_path):
+        """A repo with path-scoped mappings appears in each matched component's repositories."""
+        reports_dir = tmp_path / "reports"
+        reports_dir.mkdir()
+        rules = [
+            {
+                "name": "no-image-tags",
+                "passed": False,
+                "blockers": 2,
+                "infos": 0,
+                "findings": [
+                    {
+                        "severity": "blocker",
+                        "file": "modules/kserve/config.yaml",
+                        "line": 5,
+                        "image": "quay.io/org/img:latest",
+                        "message": "Mutable tag",
+                    },
+                    {
+                        "severity": "blocker",
+                        "file": "modules/pipelines/deploy.yaml",
+                        "line": 8,
+                        "image": "quay.io/org/pipe:latest",
+                        "message": "Mutable tag",
+                    },
+                ],
+            },
+        ]
+        _write_repo_report(reports_dir, "org/operator", rules, score="NOT READY")
+
+        mappings_path = tmp_path / "mappings.json"
+        _write_repo_mappings(
+            mappings_path,
+            [
+                {"repo": "org/operator", "jira_component": "Platform", "tier": "midstream"},
+                {
+                    "repo": "org/operator",
+                    "jira_component": "Model Serving",
+                    "tier": "midstream",
+                    "path": "modules/kserve",
+                },
+                {
+                    "repo": "org/operator",
+                    "jira_component": "AI Pipelines",
+                    "tier": "midstream",
+                    "path": "modules/pipelines",
+                },
+            ],
+        )
+
+        report = build_report(str(reports_dir), str(mappings_path), "", "1.0.0")
+        comp_ids = {c["id"] for c in report["components"]}
+        assert "model-serving" in comp_ids
+        assert "ai-pipelines" in comp_ids
+        assert "platform" in comp_ids
+
+        ms_comp = next(c for c in report["components"] if c["id"] == "model-serving")
+        assert "org/operator" in ms_comp["repositories"]
+
+    def test_finding_without_file_goes_to_default(self, tmp_path):
+        """A finding with no file path goes to the default component."""
+        reports_dir = tmp_path / "reports"
+        reports_dir.mkdir()
+        rules = [
+            {
+                "name": "params-env-wiring",
+                "passed": False,
+                "blockers": 1,
+                "infos": 0,
+                "findings": [
+                    {
+                        "severity": "blocker",
+                        "file": "",
+                        "line": 0,
+                        "image": "",
+                        "message": "orphan os.Getenv call",
+                    },
+                ],
+            },
+        ]
+        _write_repo_report(reports_dir, "org/operator", rules, score="NOT READY")
+
+        mappings_path = tmp_path / "mappings.json"
+        _write_repo_mappings(
+            mappings_path,
+            [
+                {"repo": "org/operator", "jira_component": "Platform", "tier": "midstream"},
+                {
+                    "repo": "org/operator",
+                    "jira_component": "Model Serving",
+                    "tier": "midstream",
+                    "path": "modules/kserve",
+                },
+            ],
+        )
+
+        report = build_report(str(reports_dir), str(mappings_path), "", "1.0.0")
+        pf_evals = [e for e in report["evaluations"] if e["component_id"] == "platform"]
+        pf_env = next(e for e in pf_evals if e["rule_id"] == "params-env-wiring")
+        assert pf_env["status"] == "unmet"
+
+
+# ─── 12. Repository ref ───────────────────────────────────────────
 
 
 class TestRepositoryRef:

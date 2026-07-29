@@ -48,11 +48,15 @@ batch scan (readiness-summary.yml)      maturity report pipeline
 
 ## Component Mapping
 
-Repos are mapped to component-maturity catalog IDs using the software catalog's `repo_mappings.json`. Each entry has `{repo, jira_component, tier}` fields. `repo` is the repository name, `jira_component` is the Jira component name used to derive the catalog ID, and `tier` indicates the repository tier (e.g., `midstream`, `upstream`) matching the software catalog's tier classification. The catalog ID is derived from the Jira component name, matching how component-maturity generates component IDs.
+Repos are mapped to component-maturity catalog IDs using the software catalog's `repo_mappings.json`. Each entry has `{repo, jira_component, tier}` fields, with an optional `path` field for monorepo-style mappings. `repo` is the repository name, `jira_component` is the Jira component name used to derive the catalog ID, and `tier` indicates the repository tier (e.g., `midstream`, `upstream`) matching the software catalog's tier classification. The catalog ID is derived from the Jira component name, matching how component-maturity generates component IDs.
 
 A vendored copy lives at `.github/config/repo_mappings.json`. The `--repo-mappings` CLI flag can override it with a freshly fetched copy. To update the vendored copy, re-run the software catalog update script and copy the resulting `repo_mappings.json` here.
 
 When multiple repos share the same Jira component (e.g., `kserve` and `odh-model-controller` both map to "Serving Orchestration"), their results are merged into a single set of evaluations. The evaluation's `component.repositories` list includes all contributing repos for matching purposes.
+
+### Path-scoped mappings
+
+Some repos (e.g., `opendatahub-io/opendatahub-operator`) have entries with a `path` field that maps subdirectories to different Jira components. When findings are generated from such a repo, each finding's file path is matched against the path prefixes using longest-prefix match. Findings that don't match any path-scoped entry are routed to the default (pathless) entry. This ensures findings from `internal/controller/modules/kserve/` are attributed to "Model Serving" rather than the catch-all "AI Core Platform" component.
 
 A repo must exist in `repo_mappings.json` before its results appear in the maturity report. If it doesn't, the upstream repo needs the `jira_component` GitHub custom property set — see the software catalog documentation for that process.
 

@@ -14,6 +14,7 @@ import sys
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NamedTuple
 
 VERSION = "1.0.0"
 
@@ -80,16 +81,25 @@ def _build_rule_def(rule_id: str, rule_entries: list[dict]) -> dict:
 _TIER_PRIORITY: dict[str, int] = {"downstream": 0, "midstream": 1, "upstream": 2}
 
 
+class RepoMapping(NamedTuple):
+    """A single repo-to-component mapping entry."""
+
+    catalog_id: str
+    jira_component: str
+    tier: str
+    path: str  # "" for default/catch-all
+
+
 def _default_repo_mappings_path() -> Path:
     return Path(__file__).parent / ".github" / "config" / "repo_mappings.json"
 
 
-def load_repo_mappings(path: str) -> dict[str, tuple[str, str, str]]:
-    """Load repo_mappings.json and build a repo → (catalog_id, name, tier) lookup.
+def load_repo_mappings(path: str) -> dict[str, list[RepoMapping]]:
+    """Load repo_mappings.json and build a repo -> list[RepoMapping] lookup.
 
-    When a repo appears more than once (e.g. at different tiers), the entry
-    closest to the productised artifact wins (downstream > midstream > upstream)
-    and a warning is logged.
+    Entries with different paths are preserved as separate mappings.
+    True duplicates (same repo AND same path) are collapsed via tier priority,
+    with a warning logged.
     """
     try:
         with open(path, encoding="utf-8") as f:
@@ -98,37 +108,49 @@ def load_repo_mappings(path: str) -> dict[str, tuple[str, str, str]]:
         logger.error("Failed to load repo mappings from %s: %s", path, e)
         return {}
 
-    mappings = data.get("mappings", [])
-    lookup: dict[str, tuple[str, str, str]] = {}
-    for entry in mappings:
+    mappings_list = data.get("mappings", [])
+    # Build: repo -> {path -> RepoMapping}
+    by_repo: dict[str, dict[str, RepoMapping]] = {}
+    for entry in mappings_list:
         repo = entry.get("repo", "")
         jira_component = entry.get("jira_component", "")
         tier = entry.get("tier") or "midstream"
-        if repo and jira_component:
-            catalog_id = jira_component.lower().replace(" ", "-")
-            if repo in lookup:
-                existing_tier = lookup[repo][2]
-                existing_prio = _TIER_PRIORITY.get(existing_tier, 99)
-                new_prio = _TIER_PRIORITY.get(tier, 99)
-                if new_prio < existing_prio:
-                    replace = True
-                elif new_prio == existing_prio:
-                    # Stable tiebreaker: alphabetically first jira_component
-                    replace = jira_component < lookup[repo][1]
-                else:
-                    replace = False
-                logger.warning(
-                    "Duplicate repo mapping for %s (tiers: %s, %s — keeping %s)",
-                    repo,
-                    existing_tier,
-                    tier,
-                    tier if replace else existing_tier,
-                )
-                if replace:
-                    lookup[repo] = (catalog_id, jira_component, tier)
-                continue
-            lookup[repo] = (catalog_id, jira_component, tier)
-    return lookup
+        entry_path = entry.get("path", "")
+        if not (repo and jira_component):
+            continue
+
+        catalog_id = jira_component.lower().replace(" ", "-")
+        mapping = RepoMapping(catalog_id, jira_component, tier, entry_path)
+
+        if repo not in by_repo:
+            by_repo[repo] = {}
+
+        key = entry_path
+        if key in by_repo[repo]:
+            existing = by_repo[repo][key]
+            existing_prio = _TIER_PRIORITY.get(existing.tier, 99)
+            new_prio = _TIER_PRIORITY.get(tier, 99)
+            if new_prio < existing_prio:
+                replace = True
+            elif new_prio == existing_prio:
+                # Stable tiebreaker: alphabetically first jira_component
+                replace = jira_component < existing.jira_component
+            else:
+                replace = False
+            logger.warning(
+                "Duplicate repo mapping for %s path=%r (tiers: %s, %s — keeping %s)",
+                repo,
+                entry_path,
+                existing.tier,
+                tier,
+                tier if replace else existing.tier,
+            )
+            if replace:
+                by_repo[repo][key] = mapping
+            continue
+        by_repo[repo][key] = mapping
+
+    return {repo: list(entries.values()) for repo, entries in by_repo.items()}
 
 
 # ─── Location construction ─────────────────────────────────────────
@@ -197,31 +219,125 @@ def _load_repo_reports(reports_dir: str) -> dict[str, dict]:
     return reports
 
 
+def _match_finding_component(file_path: str, mappings: list[RepoMapping]) -> list[RepoMapping]:
+    """Find the best-matching mapping(s) for a finding's file path.
+
+    Uses longest-prefix match among path-scoped entries.  Falls back to the
+    default (pathless) mapping if no path-scoped entry matches.
+    Returns all mappings at the best match length (handles same-path
+    multi-component cases).
+    """
+    if not file_path:
+        return [m for m in mappings if not m.path] or mappings[:1]
+
+    best_len = 0
+    best: list[RepoMapping] = []
+    for m in mappings:
+        if not m.path:
+            continue
+        prefix = m.path.rstrip("/")
+        if file_path == prefix or file_path.startswith(prefix + "/"):
+            if len(prefix) > best_len:
+                best_len = len(prefix)
+                best = [m]
+            elif len(prefix) == best_len:
+                best.append(m)
+
+    if best:
+        return best
+    return [m for m in mappings if not m.path] or mappings[:1]
+
+
+def _route_repo_to_components(
+    repo_name: str,
+    report_data: dict,
+    mappings: list[RepoMapping],
+) -> dict[str, tuple[str, str, dict]]:
+    """Split a repo's report across components based on path-scoped mappings.
+
+    For repos with only pathless mappings (the common case), the full report is
+    returned as-is.  For repos with path-scoped mappings, each finding is routed
+    to the component whose path prefix best matches the finding's file, and per-
+    component filtered reports are built with recalculated passed/blocker counts.
+
+    Returns: {catalog_id: (component_name, tier, filtered_report)}
+    """
+    has_paths = any(m.path for m in mappings)
+    if not has_paths:
+        m = mappings[0]
+        return {m.catalog_id: (m.jira_component, m.tier, report_data)}
+
+    # Route each finding to its component(s)
+    finding_buckets: dict[str, list[tuple[str, dict]]] = defaultdict(list)
+    all_catalog_ids: dict[str, tuple[str, str]] = {}  # catalog_id -> (name, tier)
+    for m in mappings:
+        all_catalog_ids[m.catalog_id] = (m.jira_component, m.tier)
+
+    for rule in report_data.get("rules", []):
+        rule_name = rule.get("name", "")
+        for finding in rule.get("findings", []):
+            matched = _match_finding_component(finding.get("file", ""), mappings)
+            for m in matched:
+                finding_buckets[m.catalog_id].append((rule_name, finding))
+
+    # Build filtered reports per component
+    result: dict[str, tuple[str, str, dict]] = {}
+    for catalog_id, (name, tier) in all_catalog_ids.items():
+        component_findings = finding_buckets.get(catalog_id, [])
+        findings_by_rule: dict[str, list[dict]] = defaultdict(list)
+        for rule_name, finding in component_findings:
+            findings_by_rule[rule_name].append(finding)
+
+        filtered_rules = []
+        for rule in report_data.get("rules", []):
+            rule_name = rule.get("name", "")
+            my_findings = findings_by_rule.get(rule_name, [])
+            has_blockers = any(f.get("severity") == "blocker" for f in my_findings)
+            filtered_rule = dict(rule)
+            filtered_rule["findings"] = my_findings
+            filtered_rule["passed"] = not has_blockers
+            filtered_rule["blockers"] = sum(
+                1 for f in my_findings if f.get("severity") == "blocker"
+            )
+            filtered_rule["infos"] = sum(1 for f in my_findings if f.get("severity") != "blocker")
+            filtered_rules.append(filtered_rule)
+
+        filtered_report = dict(report_data)
+        filtered_report["rules"] = filtered_rules
+        result[catalog_id] = (name, tier, filtered_report)
+
+    return result
+
+
 def _build_component_data(
     repo_reports: dict[str, dict],
-    repo_lookup: dict[str, tuple[str, str, str]],
+    repo_lookup: dict[str, list[RepoMapping]],
 ) -> dict:
     """Group repo reports by catalog_id.
+
+    For repos with path-scoped mappings, findings are routed to the correct
+    component based on file path prefix matching.
 
     Returns: {catalog_id: {name, repos: [{repo_name, report_data}]}}
     """
     components = defaultdict(lambda: {"name": "", "repos": []})
 
     for repo_name, report_data in repo_reports.items():
-        mapping = repo_lookup.get(repo_name)
-        if not mapping:
+        mappings = repo_lookup.get(repo_name)
+        if not mappings:
             logger.warning("Repo %s not in repo mappings — skipping", repo_name)
             continue
 
-        catalog_id, component_name, tier = mapping
-        components[catalog_id]["name"] = component_name
-        components[catalog_id]["repos"].append(
-            {
-                "repo_name": repo_name,
-                "tier": tier,
-                "report": report_data,
-            }
-        )
+        routed = _route_repo_to_components(repo_name, report_data, mappings)
+        for catalog_id, (component_name, tier, filtered_report) in routed.items():
+            components[catalog_id]["name"] = component_name
+            components[catalog_id]["repos"].append(
+                {
+                    "repo_name": repo_name,
+                    "tier": tier,
+                    "report": filtered_report,
+                }
+            )
 
     return dict(components)
 
