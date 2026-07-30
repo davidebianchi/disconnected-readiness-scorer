@@ -446,7 +446,27 @@ exceptions:
     expires: "2027-07-07"
 
   # --- ogx-k8s-operator ---
-  # (no repo-specific exceptions)
+  - rules:
+      - image-manifest-complete
+      - no-image-tags
+    repo: ogx-k8s-operator
+    paths:
+      - "distributions.json"
+    images:
+      - "docker.io/ogxai/*"
+    reason: "Upstream community distribution images - ODH/RHOAI sets RELATED_IMAGE_ODH_OGX_CORE_IMAGE which bypasses distributions.json entirely, using only the rh/rh-dev distribution image"
+
+  - rules: image-manifest-complete
+    repo: ogx-k8s-operator
+    paths:
+      - "pkg/cluster/cluster.go"
+    message: "*RELATED_IMAGE*"
+    reason: "Generic RELATED_IMAGE_* override support for upstream distributions - in ODH/RHOAI, RELATED_IMAGE_ODH_OGX_CORE_IMAGE takes precedence and these vars are never reached"
+
+  - rules: params-env-wiring
+    repo: ogx-k8s-operator
+    message: "*RELATED_IMAGE_ODH_OGX_CORE_IMAGE*"
+    reason: "Wired via kustomize replacements in config/overlays/odh/ and config/overlays/rhoai/ - params.env ConfigMap injects the value into the Deployment env var at render time, but the scanner checks rendered base manifests rather than overlay output"
 
   # --- ogx ---
   # (no repo-specific exceptions)
