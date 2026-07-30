@@ -574,6 +574,7 @@ def render_json(
                 }
                 for exc, days_since in expired
             ]
+        _today = today if today is not None else date.today()
         unused = [
             {
                 "rules": sorted(_normalize_rules(exc.get("rules", ""))),
@@ -581,7 +582,10 @@ def render_json(
                 **({"repo": exc["repo"]} if exc.get("repo") else {}),
             }
             for i, exc in enumerate(exceptions)
-            if i < len(exception_hits) and exception_hits[i] == 0
+            if i < len(exception_hits)
+            and exception_hits[i] == 0
+            and exc.get("repo")
+            and not (isinstance(exc.get("expires"), date) and exc["expires"] < _today)
         ]
         if unused:
             data["unused_exceptions"] = unused
@@ -827,14 +831,19 @@ def _audit_exceptions(exceptions):
     return findings
 
 
-def _build_unused_exceptions_section(exceptions, exception_hits):
-    """Build markdown section listing exceptions that matched zero findings."""
+def _build_unused_exceptions_section(exceptions, exception_hits, *, today=None):
+    """Build markdown section listing repo-scoped exceptions that matched zero findings."""
     if not exceptions or not exception_hits:
         return ""
+    if today is None:
+        today = date.today()
     unused = [
         exc
         for i, exc in enumerate(exceptions)
-        if i < len(exception_hits) and exception_hits[i] == 0
+        if i < len(exception_hits)
+        and exception_hits[i] == 0
+        and exc.get("repo")
+        and not (isinstance(exc.get("expires"), date) and exc["expires"] < today)
     ]
     if not unused:
         return ""
@@ -848,10 +857,7 @@ def _build_unused_exceptions_section(exceptions, exception_hits):
         "|-------|------|--------|",
     ]
     for exc in unused:
-        rules_value = exc.get("rules", "")
-        if isinstance(rules_value, list):
-            rules_value = ", ".join(rules_value)
-        rules_cell = _escape_md_cell(rules_value)
+        rules_cell = _escape_md_cell(_rules_display_str(exc.get("rules", "")))
         repo = _escape_md_cell(exc.get("repo", ""))
         reason = _escape_md_cell(exc.get("reason", ""))
         lines.append(f"| {rules_cell} | {repo} | {reason} |")
@@ -954,7 +960,7 @@ def render_markdown(score, results, repo_name, exceptions=None, exception_hits=N
             exceptions or [], today=today
         ),
         "unused_exceptions_section": _build_unused_exceptions_section(
-            exceptions or [], exception_hits or []
+            exceptions or [], exception_hits or [], today=today
         ),
         "false_positive_section": _build_false_positive_section(_build_exception_snippets(results)),
     }
@@ -1314,7 +1320,11 @@ def main(argv=None):
 
     if args.audit_exceptions:
         config_path = args.config or str(Path(__file__).parent / CENTRAL_CONFIG_PATH)
-        central_cfg = load_central_config(config_path)
+        try:
+            central_cfg = load_central_config(config_path)
+        except (ConfigError, ValueError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
         exceptions = central_cfg["exceptions"]
         audit_findings = _audit_exceptions(exceptions)
         warnings = [f for f in audit_findings if f["level"] == "warning"]
@@ -1325,9 +1335,7 @@ def main(argv=None):
             print("-" * 100)
             for finding in warnings:
                 exc = finding["exception"]
-                rules_value = exc.get("rules", "")
-                if isinstance(rules_value, list):
-                    rules_value = ", ".join(rules_value)
+                rules_value = _rules_display_str(exc.get("rules", ""))
                 print(
                     f"{finding['index'] + 1:<4} "
                     f"{rules_value:<30} "

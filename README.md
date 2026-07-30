@@ -43,7 +43,7 @@ python3 main.py --list-expiring                                                #
 python3 main.py --audit-exceptions                                             # analyze exception scope quality
 ```
 
-Exit code is `0` for READY, `1` for NOT READY. `--list-expiring` and `--audit-exceptions` exit with `2` if findings exist.
+Exit code is `0` for READY, `1` for NOT READY. `--list-expiring` exits with `2` if any expired or expiring exceptions exist. `--audit-exceptions` exits with `2` if warnings are found, `0` for info-only or no findings.
 
 ### Individual rules
 
@@ -240,7 +240,7 @@ Exception matching uses **glob patterns** (via Python's `fnmatch`), not regex. G
 - `*` — matches any sequence of characters (except `/` in paths)
 - `?` — matches exactly one character
 - `[abc]` — matches one character from the set
-- `**/ ` prefix — matches at any directory depth (extended glob)
+- `**/` prefix — matches at any directory depth (extended glob)
 - `/**` suffix — matches directory and all contents
 
 For `message` matching, use `*text*` for substring matching (e.g. `message: "*hardcoded*"`). Exact strings without wildcards must match the full message.
