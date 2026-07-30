@@ -2470,6 +2470,34 @@ class TestAuditExceptions:
         warnings = [f for f in findings if f["level"] == "warning"]
         assert len(warnings) == 2
 
+    def test_repo_specific_wildcard_with_images_no_wildcard_warning(self):
+        exceptions = [
+            {
+                "rules": "*",
+                "repo": "my-repo",
+                "paths": ["config/**"],
+                "images": ["REPLACE_IMAGE:*"],
+                "reason": "constrained by images",
+            },
+        ]
+        findings = _audit_exceptions(exceptions)
+        warnings = [f for f in findings if f["level"] == "warning" and 'rules: "*"' in f["reason"]]
+        assert len(warnings) == 0
+
+    def test_repo_specific_wildcard_with_message_no_wildcard_warning(self):
+        exceptions = [
+            {
+                "rules": "*",
+                "repo": "my-repo",
+                "paths": ["src/**"],
+                "message": "*specific*",
+                "reason": "constrained by message",
+            },
+        ]
+        findings = _audit_exceptions(exceptions)
+        warnings = [f for f in findings if f["level"] == "warning" and 'rules: "*"' in f["reason"]]
+        assert len(warnings) == 0
+
 
 # --- unused exceptions ---
 

@@ -790,7 +790,7 @@ def _audit_exceptions(exceptions):
         has_images = bool(exc.get("images"))
         has_paths = bool(exc.get("paths"))
 
-        if is_wildcard and has_repo:
+        if is_wildcard and has_repo and not has_message and not has_images:
             findings.append(
                 {
                     "index": i,
