@@ -585,6 +585,7 @@ def render_json(
             if i < len(exception_hits)
             and exception_hits[i] == 0
             and exc.get("repo")
+            and _repo_matches(exc.get("repo"), repo_name)
             and not (isinstance(exc.get("expires"), date) and exc["expires"] < _today)
         ]
         if unused:
@@ -831,7 +832,16 @@ def _audit_exceptions(exceptions):
     return findings
 
 
-def _build_unused_exceptions_section(exceptions, exception_hits, *, today=None):
+def _repo_matches(exc_repo, repo_name):
+    """Check whether an exception's repo field matches the scanned repo name."""
+    if not exc_repo:
+        return False
+    if "/" in exc_repo:
+        return exc_repo == repo_name
+    return exc_repo == repo_name.rsplit("/", 1)[-1]
+
+
+def _build_unused_exceptions_section(exceptions, exception_hits, repo_name="", *, today=None):
     """Build markdown section listing repo-scoped exceptions that matched zero findings."""
     if not exceptions or not exception_hits:
         return ""
@@ -843,6 +853,7 @@ def _build_unused_exceptions_section(exceptions, exception_hits, *, today=None):
         if i < len(exception_hits)
         and exception_hits[i] == 0
         and exc.get("repo")
+        and _repo_matches(exc.get("repo"), repo_name)
         and not (isinstance(exc.get("expires"), date) and exc["expires"] < today)
     ]
     if not unused:
@@ -960,7 +971,7 @@ def render_markdown(score, results, repo_name, exceptions=None, exception_hits=N
             exceptions or [], today=today
         ),
         "unused_exceptions_section": _build_unused_exceptions_section(
-            exceptions or [], exception_hits or [], today=today
+            exceptions or [], exception_hits or [], repo_name, today=today
         ),
         "false_positive_section": _build_false_positive_section(_build_exception_snippets(results)),
     }

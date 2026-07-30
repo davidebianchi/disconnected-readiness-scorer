@@ -2480,26 +2480,26 @@ class TestUnusedExceptions:
             {"rules": "no-image-tags", "reason": "ok", "repo": "a"},
             {"rules": "*", "reason": "unused one", "repo": "foo"},
         ]
-        section = _build_unused_exceptions_section(exceptions, [3, 0])
+        section = _build_unused_exceptions_section(exceptions, [3, 0], "foo")
         assert "## Unused Exceptions" in section
         assert "unused one" in section
         assert "no-image-tags" not in section
 
     def test_empty_when_all_have_hits(self):
         exceptions = [{"rules": "*", "reason": "ok", "repo": "r"}]
-        assert _build_unused_exceptions_section(exceptions, [5]) == ""
+        assert _build_unused_exceptions_section(exceptions, [5], "r") == ""
 
     def test_empty_when_no_exceptions(self):
-        assert _build_unused_exceptions_section([], []) == ""
+        assert _build_unused_exceptions_section([], [], "") == ""
 
     def test_empty_when_no_hits_list(self):
-        assert _build_unused_exceptions_section(None, None) == ""
+        assert _build_unused_exceptions_section(None, None, "") == ""
 
     def test_list_rules_joined_in_table(self):
         exceptions = [
             {"rules": ["no-image-tags", "no-runtime-egress"], "reason": "multi", "repo": "r"},
         ]
-        section = _build_unused_exceptions_section(exceptions, [0])
+        section = _build_unused_exceptions_section(exceptions, [0], "r")
         assert "no-image-tags, no-runtime-egress" in section
 
     def test_global_exceptions_excluded(self):
@@ -2507,24 +2507,42 @@ class TestUnusedExceptions:
             {"rules": "*", "reason": "universal test dirs"},
             {"rules": "no-image-tags", "reason": "repo one", "repo": "foo"},
         ]
-        section = _build_unused_exceptions_section(exceptions, [0, 0])
+        section = _build_unused_exceptions_section(exceptions, [0, 0], "foo")
         assert "universal test dirs" not in section
         assert "repo one" in section
+
+    def test_other_repo_exceptions_excluded(self):
+        exceptions = [
+            {"rules": "*", "reason": "for bar", "repo": "bar"},
+            {"rules": "no-image-tags", "reason": "for foo", "repo": "foo"},
+        ]
+        section = _build_unused_exceptions_section(exceptions, [0, 0], "foo")
+        assert "for bar" not in section
+        assert "for foo" in section
+
+    def test_short_repo_matches_full_name(self):
+        exceptions = [
+            {"rules": "*", "reason": "match", "repo": "my-repo"},
+        ]
+        section = _build_unused_exceptions_section(exceptions, [0], "org/my-repo")
+        assert "match" in section
 
     def test_expired_exceptions_excluded(self):
         exceptions = [
             {"rules": "*", "reason": "expired", "repo": "foo", "expires": date(2020, 1, 1)},
-            {"rules": "no-image-tags", "reason": "active unused", "repo": "bar"},
+            {"rules": "no-image-tags", "reason": "active unused", "repo": "foo"},
         ]
-        section = _build_unused_exceptions_section(exceptions, [0, 0], today=date(2025, 1, 1))
+        section = _build_unused_exceptions_section(
+            exceptions, [0, 0], "foo", today=date(2025, 1, 1)
+        )
         assert "expired" not in section
         assert "active unused" in section
 
     def test_json_report_includes_unused_exceptions(self):
         results = [RuleResult(rule="r", findings=[])]
         exceptions = [
-            {"rules": "no-image-tags", "reason": "used", "repo": "a"},
-            {"rules": "*", "reason": "unused one", "repo": "b"},
+            {"rules": "no-image-tags", "reason": "used", "repo": "repo"},
+            {"rules": "*", "reason": "unused one", "repo": "repo"},
         ]
         data = json.loads(
             render_json(
@@ -2541,7 +2559,7 @@ class TestUnusedExceptions:
 
     def test_json_report_no_unused_when_all_hit(self):
         results = [RuleResult(rule="r", findings=[])]
-        exceptions = [{"rules": "*", "reason": "ok", "repo": "r"}]
+        exceptions = [{"rules": "*", "reason": "ok", "repo": "repo"}]
         data = json.loads(
             render_json(
                 "READY",
@@ -2549,6 +2567,22 @@ class TestUnusedExceptions:
                 "repo",
                 exceptions=exceptions,
                 exception_hits=[1],
+            )
+        )
+        assert "unused_exceptions" not in data
+
+    def test_json_report_excludes_other_repo_from_unused(self):
+        results = [RuleResult(rule="r", findings=[])]
+        exceptions = [
+            {"rules": "*", "reason": "other repo", "repo": "other"},
+        ]
+        data = json.loads(
+            render_json(
+                "READY",
+                results,
+                "my-repo",
+                exceptions=exceptions,
+                exception_hits=[0],
             )
         )
         assert "unused_exceptions" not in data
