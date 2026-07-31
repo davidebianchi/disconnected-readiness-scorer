@@ -33,7 +33,13 @@ Every container image reference must be mapped to a `RELATED_IMAGE_*` env var (o
 
 **Remediate:** See the [image-manifest-complete reference doc](references/image-manifest-complete.md) for detailed guidance by pattern (env_var, params.env, static CSV) with code examples.
 
-**False positives:** Build-time-only images (in scripts that generate Dockerfiles but never run on-cluster), images behind disabled feature gates, and files marked `[out of production scope]`. If a non-production file is not already auto-excepted, add a path exception in [config/config.yaml](https://github.com/opendatahub-io/disconnected-readiness-scorer/blob/main/config/config.yaml).
+- **params.env repos** (most components): Add the image to `params.env` with an appropriate key, wire it via kustomize `configMapKeyRef` or replacement, then ensure the operator's `*_support.go` maps the key to a `RELATED_IMAGE_*` var (see the [params.env wiring section](#5-paramsenv--kustomize-wiring-params-env-wiring) for the full chain). Finally, ensure the `RELATED_IMAGE_*` is declared in both [RHOAI-Build-Config](https://github.com/red-hat-data-services/RHOAI-Build-Config) and [ODH-Build-Config](https://github.com/opendatahub-io/ODH-Build-Config) `bundle-patch.yaml`.
+
+- **RELATED_IMAGE env var repos** (repos that read `os.Getenv("RELATED_IMAGE_*")` directly): Replace the hardcoded image string with a `RELATED_IMAGE_*` env var lookup. Ensure the var is declared in the Build-Config repos and mapped in the operator's `*_support.go` `imageParamMap`/`imagesMap` for that component.
+
+- **Stale vars**: If the scanner flags a `RELATED_IMAGE_*` var that exists in your repo but is no longer in the operator manifest, remove the stale reference from your code.
+
+**False positives:** Build-time-only images (in scripts that generate Dockerfiles but never run on-cluster), images behind disabled feature gates, and files marked `[out of production scope]` (not compiled into the production binary). If a non-production file is not already auto-excluded, add a path exclusion in [config/config.yaml](https://github.com/opendatahub-io/disconnected-readiness-scorer/blob/main/config/config.yaml) (see [Excluding False Positives from Scans](#excluding-false-positives-from-scans)).
 
 ## 2. Mutable Image Tags (`no-image-tags`)
 
@@ -43,7 +49,7 @@ All image references must use `@sha256:` digests, not mutable tags (`:latest`, `
 
 **Remediate:** See the [no-image-tags reference doc](references/no-image-tags.md) for digest lookup commands and before/after code examples.
 
-**False positives:** Build-time images (Dockerfiles, CI scripts) that are never pulled on-cluster should be auto-excepted. Files marked `[out of production scope]` are already downgraded. Non-image strings that happen to match the `registry/org/name:tag` pattern (npm refs in `package.json` are already excluded, but other formats may occasionally trigger).
+**False positives:** Build-time images (Dockerfiles, CI scripts) that are never pulled on-cluster should be auto-excluded. Files marked `[out of production scope]` are already downgraded. Non-image strings that happen to match the `registry/org/name:tag` pattern (npm refs in `package.json` are already excluded, but other formats may occasionally trigger).
 
 ## 3. Runtime Network Egress (`no-runtime-egress`)
 
@@ -53,7 +59,7 @@ Detects outbound HTTP/network calls (`http.Get`, `requests.get`, `fetch`, `curl`
 
 **Remediate:** See the [no-runtime-egress reference doc](references/no-runtime-egress.md) for options including making URLs configurable, pre-caching model artifacts, and requesting exceptions.
 
-**False positives:** HTTP client setup code that constructs a client but only calls internal endpoints; Go files outside production scope; URLs that are configurable but the config read happens on a different line. Verify manually and add a central exception if confirmed safe.
+**False positives:** HTTP client setup code that constructs a client but only calls internal endpoints; Go files outside production scope; URLs that are configurable but the config read happens on a different line. Verify manually and add a central exclusion if confirmed safe.
 
 ## 4. Python Dependency Availability (`python-imports-bundled`)
 
@@ -81,34 +87,44 @@ Validates the full wiring chain: `params.env` key → kustomize `configMapKeyRef
 
 Ask yourself: **does this code actually run on a customer cluster in production?**
 
-- **No, it's test/CI/docs/examples** → Should be auto-excepted; if not, add a path exception
+- **No, it's test/CI/docs/examples** → Should be auto-excluded; if not, add a path exclusion
 - **No, it only runs at build time** → Not a runtime concern (e.g. Dockerfiles, build scripts, lockfile generators)
 - **No, it's in a manifest that isn't deployed** → Not a customer-facing resource
-- **Unsure** → Check whether the finding is annotated `[out of production scope]`, which means the scanner determined it's not in the production code path. If there's no annotation and you still believe it's a false positive, open a PR to request a central exception with a reason.
-- **Yes, it runs in production** → The finding is real and needs remediation
+- **Unsure** → Check whether the finding is annotated `[out of production scope]`, which means the scanner determined it's not in the production code path. If there's no annotation and you still believe it's a false positive, open a PR to add an exclusion with a reason.
+- **Yes, it runs in production** → The finding is real and needs remediation (or a time-bounded exception — see below)
 
-## Configuring Exceptions
+## Excluding False Positives from Scans
 
-The centralized [config/config.yaml](https://github.com/opendatahub-io/disconnected-readiness-scorer/blob/main/config/config.yaml) already excludes common test directories, CI config, build files, docs, examples, and samples. For repo-specific overrides, create a new exception entry that references your repo, open a PR, and request a review.
+The centralized [config/config.yaml](https://github.com/opendatahub-io/disconnected-readiness-scorer/blob/main/config/config.yaml) already excludes common non-production paths — test directories, CI config, build files, docs, examples, and samples — via universal `rules: "*"` entries. These **exclusions** suppress all rules for paths that categorically cannot produce valid disconnected findings.
 
-Example:
+For repo-specific non-production paths not covered by the universal patterns (e.g., an unusual dev-tooling directory), add an exclusion entry scoped with `repo:`, open a PR, and request review. Use `rules: "*"` only when the path is genuinely non-production for every rule — if only some rules are irrelevant, list those rules explicitly.
+
 ```yaml
 exceptions:
   - rules: "*"
     paths:
       - "internal/devtools/**"
-    repo: opendatahub-io/kserve
+    repo: kserve
     reason: "Dev tooling — not deployed in production"
 ```
 
-**Time-bounded exceptions:** For temporary workarounds, add an `expires: "YYYY-MM-DD"` field. The scanner will stop honoring the exception after that date, and the PR check will start failing again — ensuring the team returns to fix the root cause. The scanner warns 14 days before expiration in its report output. To renew, update the `expires` date and submit a PR.
+**Exclusions vs. exceptions:** Exclusions (`rules: "*"`, no `expires`) silence non-production noise — test directories, CI config, documentation, build files, and similar paths that never run on a customer cluster. Exceptions (specific rules, `expires` date, tracking ticket) acknowledge real disconnected issues that need time to fix — see [Time-Bounded Exceptions](#time-bounded-exceptions-for-real-issues) below. Do not use `rules: "*"` exceptions for genuine findings; overly broad wildcards silently mask real issues across rules the path does violate (CWE-16). If a path is test, CI, documentation, or build noise, it belongs in an exclusion — not in a time-bounded exception.
+
+## Time-Bounded Exceptions for Real Issues
+
+Exceptions are for **real disconnected problems** that the team acknowledges but cannot fix immediately. They are always time-bounded with an `expires` date — the scanner will stop honoring the exception after that date, and the PR check will start failing again, ensuring the team returns to fix the root cause. The scanner warns 14 days before expiration in its report output. To renew, update the `expires` date and submit a PR with justification.
 
 ```yaml
 exceptions:
-  - rule: no-runtime-egress
+  - rules: no-runtime-egress
     repo: my-component
     paths:
       - "internal/legacy_client.go"
-    reason: "Legacy HTTP client — migrating to configurable URL"
+    reason: "Legacy HTTP client — migrating to configurable URL in RHOAIENG-12345"
     expires: "2026-12-31"
 ```
+
+Unlike exclusions, exceptions should always:
+- Target specific rules (not `"*"`)
+- Include an `expires` date
+- Reference a tracking ticket in the `reason` field

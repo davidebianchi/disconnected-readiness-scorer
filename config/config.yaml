@@ -406,8 +406,10 @@ exceptions:
       - "sdk/python/feast/api/registry/rest/rest_registry_server.py"
       - "sdk/python/feast/infra/mcp_servers/mcp_server.py"
       - "sdk/python/feast/infra/offline_stores/offline_store.py"
-    reason: "String literals in ImportError/warning messages guiding users to install optional dependencies — no actual runtime pip subprocess invocations"
+      - "sdk/python/feast/infra/online_stores/scylladb_online_store/scylladb.py"
+    reason: "String literals in ImportError/warning messages or docstrings guiding users to install optional dependencies — no actual runtime pip subprocess invocations"
     reference: "https://issues.redhat.com/browse/RHOAIENG-69995"
+    expires: "2027-07-21"
 
   - rules: no-runtime-egress
     repo: feast
@@ -444,7 +446,27 @@ exceptions:
     expires: "2027-07-07"
 
   # --- ogx-k8s-operator ---
-  # (no repo-specific exceptions)
+  - rules:
+      - image-manifest-complete
+      - no-image-tags
+    repo: ogx-k8s-operator
+    paths:
+      - "distributions.json"
+    images:
+      - "docker.io/ogxai/*"
+    reason: "Upstream community distribution images - ODH/RHOAI sets RELATED_IMAGE_ODH_OGX_CORE_IMAGE which bypasses distributions.json entirely, using only the rh/rh-dev distribution image"
+
+  - rules: image-manifest-complete
+    repo: ogx-k8s-operator
+    paths:
+      - "pkg/cluster/cluster.go"
+    message: "*RELATED_IMAGE*"
+    reason: "Generic RELATED_IMAGE_* override support for upstream distributions - in ODH/RHOAI, RELATED_IMAGE_ODH_OGX_CORE_IMAGE takes precedence and these vars are never reached"
+
+  - rules: params-env-wiring
+    repo: ogx-k8s-operator
+    message: "*RELATED_IMAGE_ODH_OGX_CORE_IMAGE*"
+    reason: "Wired via kustomize replacements in config/overlays/odh/ and config/overlays/rhoai/ - params.env ConfigMap injects the value into the Deployment env var at render time, but the scanner checks rendered base manifests rather than overlay output"
 
   # --- ogx ---
   # (no repo-specific exceptions)
@@ -521,7 +543,14 @@ exceptions:
     reason: "Local development convenience overlay — not referenced by production kustomize overlays; KServe is deployed separately by the opendatahub-operator KServe module"
 
   # --- mlflow-operator ---
-  # (no repo-specific exceptions)
+  - rules: params-env-wiring
+    repo: mlflow-operator
+    paths:
+      - "config/base"
+      - "config/manager"
+    images:
+      - "localhost/mlflow-operator:*"
+    reason: "Base/manager use a localhost CI/dev placeholder; production overlays (odh/rhoai/openshift) replace the controller image from params.env MLFLOW_OPERATOR_IMAGE"
 
   # --- spark-operator ---
   # (no repo-specific exceptions)
@@ -656,3 +685,19 @@ exceptions:
     images:
       - "registry.access.redhat.com/ubi9/ubi*"
     reason: "Image reference inside a suggested 'oc run' command printed as guidance text — never executed by the MCP server"
+
+  # --- trainer-operator ---
+  - rules:
+      - image-manifest-complete
+      - no-image-tags
+    repo: trainer-operator
+    paths:
+      - "manifests/trainer/base/runtimes/**"
+    reason: "Upstream Kubeflow Trainer default runtimes — RHOAI deploys exclusively from manifests/trainer/rhoai/ (operator SourcePath hardcoded to 'rhoai'). Community images (ghcr.io/kubeflow/trainer, pytorch/pytorch) are never used in production."
+
+  - rules: image-manifest-complete
+    repo: trainer-operator
+    paths:
+      - "manifests/trainer/overlays/kubeflow-platform/**"
+      - "manifests/trainer/overlays/runtimes/**"
+    reason: "Upstream Kubeflow community overlays — only used by the kubeflow-platform deployment path, not by RHOAI (operator uses manifests/trainer/rhoai/ directly)"
