@@ -295,6 +295,15 @@ exceptions:
     message: "*ubi-micro*"
     reason: "Modelcar init container default — tag is replaced by digest-pinned image via RELATED_IMAGE_* injection at runtime. The image-manifest-complete blocker for this line is tracked separately for a code fix in kserve"
 
+  # kserve-module operator controller image — injected by the platform operator, not params.env
+  - rules: params-env-wiring
+    repo: kserve
+    paths:
+      - "kserve-module/config"
+    images:
+      - "quay.io/opendatahub/odh-kserve-module-operator:*"
+    reason: "Module operator controller image is overridden at runtime by opendatahub-operator via ModuleConfig.ControllerImage (RELATED_IMAGE_ODH_KSERVE_MODULE_OPERATOR_IMAGE) → injectModuleEnv, not through params.env. Same pattern as the mcp-lifecycle-module-operator and mlflow-operator exceptions below."
+
   # --- kuberay ---
   - rules: "*"
     repo: kuberay
