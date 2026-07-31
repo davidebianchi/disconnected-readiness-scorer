@@ -116,18 +116,20 @@ Ask yourself: **does this code actually run on a customer cluster in production?
 
 ## Excluding False Positives from Scans
 
-The centralized [config/config.yaml](https://github.com/opendatahub-io/disconnected-readiness-scorer/blob/main/config/config.yaml) already excludes common test directories, CI config, build files, docs, examples, and samples. These are **exclusions** — paths that are not production code and should never produce findings.
+The centralized [config/config.yaml](https://github.com/opendatahub-io/disconnected-readiness-scorer/blob/main/config/config.yaml) already excludes common non-production paths — test directories, CI config, build files, docs, examples, and samples — via universal `rules: "*"` entries. These **exclusions** suppress all rules for paths that categorically cannot produce valid disconnected findings.
 
-For repo-specific false positives, add a new exclusion entry that references your repo, open a PR, and request a review.
+For repo-specific non-production paths not covered by the universal patterns (e.g., an unusual dev-tooling directory), add an exclusion entry scoped with `repo:`, open a PR, and request review. Use `rules: "*"` only when the path is genuinely non-production for every rule — if only some rules are irrelevant, list those rules explicitly.
 
 ```yaml
 exceptions:
   - rules: "*"
     paths:
       - "internal/devtools/**"
-    repo: opendatahub-io/kserve
+    repo: kserve
     reason: "Dev tooling — not deployed in production"
 ```
+
+**Exclusions vs. exceptions:** Exclusions (`rules: "*"`, no `expires`) silence non-production noise — test directories, CI config, documentation, build files, and similar paths that never run on a customer cluster. Exceptions (specific rules, `expires` date, tracking ticket) acknowledge real disconnected issues that need time to fix — see [Time-Bounded Exceptions](#time-bounded-exceptions-for-real-issues) below. Do not use `rules: "*"` exceptions for genuine findings; overly broad wildcards silently mask real issues across rules the path does violate (CWE-16). If a path is test, CI, documentation, or build noise, it belongs in an exclusion — not in a time-bounded exception.
 
 ## Time-Bounded Exceptions for Real Issues
 
@@ -135,7 +137,7 @@ Exceptions are for **real disconnected problems** that the team acknowledges but
 
 ```yaml
 exceptions:
-  - rule: no-runtime-egress
+  - rules: no-runtime-egress
     repo: my-component
     paths:
       - "internal/legacy_client.go"
