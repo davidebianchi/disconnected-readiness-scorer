@@ -599,22 +599,30 @@ exceptions:
     reason: "Test kustomize overlays — not deployed in production"
 
   # --- mcp-lifecycle-module-operator ---
-  - rules: no-image-tags
+  - rules:
+      - no-image-tags
+      - image-manifest-complete
+      - params-env-wiring
     repo: mcp-lifecycle-module-operator
     paths:
-      - "config/manager/manager.yaml"
+      - "config/manager/**"
+      - "config/default"
     images:
       - "controller:*"
-    reason: "Kubebuilder scaffold placeholder — production image set by opendatahub-operator ModuleConfig.ControllerImage (RELATED_IMAGE_ODH_MCP_LIFECYCLE_MODULE_OPERATOR_IMAGE) from ODH/RHOAI Build-Config digests"
+      - "quay.io/opendatahub/odh-mcp-lifecycle-module-operator"
+      - "quay.io/opendatahub/odh-mcp-lifecycle-module-operator:*"
+    reason: "Kubebuilder scaffold / checked-in default — production image set by opendatahub-operator ModuleConfig.ControllerImage (RELATED_IMAGE_ODH_MCP_LIFECYCLE_MODULE_OPERATOR_IMAGE) from ODH/RHOAI Build-Config digests"
     reference: "https://github.com/opendatahub-io/opendatahub-operator/blob/main/internal/controller/modules/mcplifecycleoperator/handler.go"
 
-  - rules: no-image-tags
+  - rules: "*"
     repo: mcp-lifecycle-module-operator
     paths:
       - "config/manifests/mcp-lifecycle-operator/**"
     reason: "Unused — not deployed by the module-operator. Intermediate copy of the upstream MCPLO manifests, checked in only as kustomize input for `make update-operand-manifests`."
 
-  - rules: no-image-tags
+  - rules:
+      - no-image-tags
+      - image-manifest-complete
     repo: mcp-lifecycle-module-operator
     paths:
       - "internal/controller/resources/mcp-lifecycle-operator.yaml"
@@ -623,6 +631,11 @@ exceptions:
     reason: "Checked-in default image for the operand Deployment — replaced at reconcile via OperandImage (RELATED_IMAGE_ODH_MCP_LIFECYCLE_OPERATOR_IMAGE, digest-pinned in ODH/RHOAI Build-Config)"
     reference: "https://github.com/opendatahub-io/mcp-lifecycle-module-operator/blob/main/internal/controller/mcplifecycleoperator_reconciler.go"
 
+  - rules: params-env-wiring
+    repo: mcp-lifecycle-module-operator
+    message: "*RELATED_IMAGE_ODH_MCP_LIFECYCLE_OPERATOR_IMAGE*"
+    reason: "Injected by opendatahub-operator into the module Deployment env — not wired via this repo's kustomize/params.env. Reconciler falls back to the embedded manifest default when unset."
+    reference: "https://github.com/opendatahub-io/opendatahub-operator/blob/main/internal/controller/modules/mcplifecycleoperator/handler.go"
 
   # --- rhoai-mcp ---
   # rhoai-mcp is an MCP server (AI agent tool layer), not a Kubernetes operator.
