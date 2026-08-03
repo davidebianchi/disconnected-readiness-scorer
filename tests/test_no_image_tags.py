@@ -232,6 +232,15 @@ class TestRun:
         assert result.passed is False
         assert any(f.severity == "blocker" for f in result.findings)
 
+    def test_docs_only_findings_leave_passed_true(self, tmp_path):
+        f = tmp_path / "crd.yaml"
+        f.write_text("description: |-\n  Example: ghcr.io/org/tool:latest\n")
+        result = run(str(tmp_path))
+        assert result.passed is True
+        assert len(result.findings) >= 1
+        assert all(finding.severity == "info" for finding in result.findings)
+        assert any("[documentation field]" in finding.message for finding in result.findings)
+
 
 class TestProductionScope:
     def test_out_of_scope_go_file_downgraded(self, tmp_path):
@@ -310,7 +319,7 @@ class TestOciUri:
         assert len(findings) == 1
         assert findings[0].severity == "info"
 
-    def test_oci_uri_out_of_production_scope_downgraded(self, tmp_path):
+    def test_oci_uri_out_of_production_scope_skipped(self, tmp_path):
         test_dir = tmp_path / "tests"
         test_dir.mkdir()
         f = test_dir / "test_utils.go"
@@ -1049,3 +1058,71 @@ class TestDowngradeConfirmedRelatedImageFindingsDirectly:
         result = RuleResult(rule="no-image-tags", passed=False, findings=[finding])
         _downgrade_confirmed_related_image_findings(result, tmp_path, {"RELATED_IMAGE_FOO"})
         assert finding.severity == "blocker"
+
+
+class TestDocumentationFieldDowngrade:
+    """``scan_file`` / ``_emit_finding`` severity for documentation-field lines.
+
+    Line-set geometry is covered in ``test_yaml_documentation_fields.py``.
+    """
+
+    def test_real_image_field_remains_blocker(self, tmp_path):
+        f = tmp_path / "deploy.yaml"
+        f.write_text("image: quay.io/org/img:v1.0\n")
+        findings = scan_file(f, tmp_path)
+        assert len(findings) == 1
+        assert findings[0].severity == "blocker"
+        assert findings[0].image == "quay.io/org/img:v1.0"
+        assert "[documentation field]" not in findings[0].message
+
+    def test_default_beside_description_remains_blocker(self, tmp_path):
+        f = tmp_path / "crd.yaml"
+        f.write_text(
+            "properties:\n"
+            "  image:\n"
+            "    description: |-\n"
+            "      Example image ghcr.io/example/tool:latest for docs only.\n"
+            "    default: quay.io/org/runtime:v1.2.3\n"
+        )
+        findings = scan_file(f, tmp_path)
+        by_image = {finding.image: finding for finding in findings}
+        assert "quay.io/org/runtime:v1.2.3" in by_image
+        assert by_image["quay.io/org/runtime:v1.2.3"].severity == "blocker"
+        assert "[documentation field]" not in by_image["quay.io/org/runtime:v1.2.3"].message
+        assert "ghcr.io/example/tool:latest" in by_image
+        assert by_image["ghcr.io/example/tool:latest"].severity == "info"
+        assert "[documentation field]" in by_image["ghcr.io/example/tool:latest"].message
+
+    def test_invalid_yaml_with_tagged_image_remains_blocker(self, tmp_path):
+        f = tmp_path / "broken.yaml"
+        f.write_text(
+            "description: |-\n"
+            "  docs ghcr.io/org/docs:latest\n"
+            "image: quay.io/org/img:v1\n"
+            "  bad-indent: true\n"
+        )
+        findings = scan_file(f, tmp_path)
+        by_image = {finding.image: finding for finding in findings}
+        assert "quay.io/org/img:v1" in by_image
+        assert by_image["quay.io/org/img:v1"].severity == "blocker"
+        assert "[documentation field]" not in by_image["quay.io/org/img:v1"].message
+        # Parse failure disables docs filter: description-body match stays blocker too.
+        assert "ghcr.io/org/docs:latest" in by_image
+        assert by_image["ghcr.io/org/docs:latest"].severity == "blocker"
+        assert "[documentation field]" not in by_image["ghcr.io/org/docs:latest"].message
+
+
+class TestDocumentationFieldKnownLimitation:
+    """Line-granular docs detection: a real `image` key on the same physical
+    line as a docs key in flow-style YAML is also downgraded.
+
+    Idiomatic Kubernetes/CRD YAML is block-style, so this is rare. If this
+    test starts failing, column-range tracking may be worth the complexity.
+    """
+
+    def test_flow_style_same_line_key_shares_docs_downgrade(self, tmp_path):
+        f = tmp_path / "flow.yaml"
+        f.write_text('{description: "See quay.io/org/doc:v1", image: quay.io/org/real:v2}\n')
+        findings = scan_file(f, tmp_path)
+        by_image = {finding.image: finding for finding in findings}
+        assert by_image["quay.io/org/real:v2"].severity == "info"

@@ -26,10 +26,10 @@ try:
         RuleResult,
         build_overlay_file_map,
         detect_image_pattern,
+        downgrade_non_production_overlay,
         find_params_env_dirs,
         get_tracked_files,
         is_file_in_production_scope,
-        is_non_production_overlay_file,
         production_scope_relative_dirs,
     )
 except ModuleNotFoundError:
@@ -41,10 +41,10 @@ except ModuleNotFoundError:
         RuleResult,
         build_overlay_file_map,
         detect_image_pattern,
+        downgrade_non_production_overlay,
         find_params_env_dirs,
         get_tracked_files,
         is_file_in_production_scope,
-        is_non_production_overlay_file,
         production_scope_relative_dirs,
     )
 
@@ -365,9 +365,9 @@ def check_env_var_pattern(
                     f"Image '{image}' has no RELATED_IMAGE_* mapping on this line. "
                     f"Will not be mirrored in disconnected environments."
                 )
-                if is_non_production_overlay_file(filepath, production_scope, overlay_file_map):
-                    severity = "info"
-                    msg += " [non-production overlay]"
+                severity, msg = downgrade_non_production_overlay(
+                    severity, msg, filepath, production_scope, overlay_file_map
+                )
                 if severity == "blocker":
                     result.passed = False
                 result.findings.append(
@@ -389,9 +389,9 @@ def check_env_var_pattern(
                         f"in the operator manifest. The operator will not inject "
                         f"this image in disconnected environments."
                     )
-                    if is_non_production_overlay_file(filepath, production_scope, overlay_file_map):
-                        severity = "info"
-                        msg += " [non-production overlay]"
+                    severity, msg = downgrade_non_production_overlay(
+                        severity, msg, filepath, production_scope, overlay_file_map
+                    )
                     if severity == "blocker":
                         result.passed = False
                     result.findings.append(
@@ -479,9 +479,9 @@ def check_static_csv_pattern(
             relative = str(filepath.relative_to(repo_root))
             severity = "blocker"
             msg = f"Image '{image}' not found in CSV relatedImages."
-            if is_non_production_overlay_file(filepath, production_scope, overlay_file_map):
-                severity = "info"
-                msg += " [non-production overlay]"
+            severity, msg = downgrade_non_production_overlay(
+                severity, msg, filepath, production_scope, overlay_file_map
+            )
             if severity == "blocker":
                 result.passed = False
             result.findings.append(
@@ -543,9 +543,9 @@ def check_unmanaged_images(
             f"The operator will not inject a mirrored version in disconnected environments."
         )
 
-        if is_non_production_overlay_file(filepath, production_scope, overlay_file_map):
-            severity = "info"
-            msg += " [non-production overlay]"
+        severity, msg = downgrade_non_production_overlay(
+            severity, msg, filepath, production_scope, overlay_file_map
+        )
 
         if severity == "blocker":
             result.passed = False
