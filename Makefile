@@ -37,10 +37,23 @@ ruff-format: ## Format Python code with ruff
 	@echo "Formatting Python code..."
 	@uv run ruff format .
 
+.PHONY: ruff-format-check
+ruff-format-check: ## Check Python formatting (no changes)
+	@echo "Checking Python formatting..."
+	@uv run ruff format --check .
+
+.PHONY: test
+test: ## Run tests
+	@uv run python -m pytest tests/ -v
+
 .PHONY: lint
-lint: ## Run all linters
+lint: ## Run all linters (matches CI)
 	@$(MAKE) skillsaw
 	@$(MAKE) ruff-check
+	@$(MAKE) ruff-format-check
+
+.PHONY: ci
+ci: lint test ## Run full CI check (lint + test)
 
 ARCH_ANALYZER_VERSION ?= v0.1.1
 ARCH_ANALYZER_REPO := ugiordan/architecture-analyzer
@@ -72,5 +85,9 @@ install-arch-analyzer: ## Download arch-analyzer binary to bin/
 		echo "  got:      $$ACTUAL"; \
 		rm -f bin/arch-analyzer; exit 1; \
 	fi
+
+.PHONY: update-repo-mappings
+update-repo-mappings: ## Refresh .github/config/repo_mappings.json from software-catalog
+	@python .github/scripts/update_repo_mappings.py
 
 .DEFAULT_GOAL := help

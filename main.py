@@ -34,36 +34,86 @@ class ArchAnalyzerError(Exception):
 CENTRAL_CONFIG_PATH = "config/config.yaml"
 _EXPIRY_WARNING_DAYS = 14
 
+REFERENCE_DOC_BASE = (
+    "https://github.com/opendatahub-io/disconnected-readiness-scorer/blob/main/docs/references"
+)
+
 RULE_REGISTRY = {
     "csv": {
         "module": "rules.image_manifest_complete",
         "name": "image-manifest-complete",
         "needs_manifest": True,
+        "display_name": "Image manifest completeness",
+        "remediation": (
+            "Register all container images used by this component in the "
+            "operator manifest. For repos using the env-var pattern, add a "
+            "RELATED_IMAGE_* environment variable to the operator deployment. "
+            "For repos using the params.env pattern, add a key to params.env "
+            "and wire it through kustomize."
+        ),
+        "reference_doc": f"{REFERENCE_DOC_BASE}/image-manifest-complete.md",
     },
     "tags": {
         "module": "rules.no_image_tags",
         "name": "no-image-tags",
         "needs_manifest": True,
+        "display_name": "No mutable image tags",
+        "remediation": (
+            "Replace all mutable image tags (:latest, :v1.2, etc.) with "
+            "immutable @sha256: digest references. Mutable tags can resolve "
+            "to different images over time and cannot be pre-pulled reliably "
+            "for disconnected deployments."
+        ),
+        "reference_doc": f"{REFERENCE_DOC_BASE}/no-image-tags.md",
     },
     "egress": {
         "module": "rules.no_runtime_egress",
         "name": "no-runtime-egress",
+        "display_name": "No runtime external calls",
+        "remediation": (
+            "Remove hardcoded external URLs from source code and manifests, "
+            "or make them configurable via environment variables or "
+            "configuration files. In a disconnected cluster, any outbound "
+            "network call to an external service will fail."
+        ),
+        "reference_doc": f"{REFERENCE_DOC_BASE}/no-runtime-egress.md",
     },
     "python": {
         "module": "rules.python_imports",
         "name": "python-imports-bundled",
+        "display_name": "Python imports bundled",
+        "remediation": (
+            "Ensure all Python package dependencies are included in the "
+            "offline-bundled package set or vendored into the container "
+            "image at build time. Runtime pip install calls will fail "
+            "without network access."
+        ),
+        "reference_doc": f"{REFERENCE_DOC_BASE}/python-imports-bundled.md",
     },
     "params_env": {
         "module": "rules.params_env",
         "name": "params-env-wiring",
         "needs_manifest": True,
+        "display_name": "Params.env wiring",
+        "remediation": (
+            "Complete the params.env wiring chain: every image reference "
+            "must flow from params.env through a kustomize configMapGenerator "
+            "into the rendered manifests. Check for hardcoded images not "
+            "sourced from params.env, unwired params.env keys, and orphan "
+            "Go os.Getenv calls."
+        ),
+        "reference_doc": f"{REFERENCE_DOC_BASE}/params-env-wiring.md",
     },
     "manifest": {
         "module": "rules.operator_manifest",
         "name": "operator-manifest",
         "is_manifest_rule": True,
+        # No display_name/remediation/reference_doc — manifest rules don't produce maturity evaluations
     },
 }
+
+# Reverse lookup: canonical rule name → registry entry
+_RULE_BY_NAME: dict[str, dict] = {v["name"]: v for v in RULE_REGISTRY.values()}
 
 VALID_RULE_NAMES = frozenset(v["name"] for v in RULE_REGISTRY.values())
 VALID_RULE_NAMES_SORTED = sorted(VALID_RULE_NAMES)
@@ -434,7 +484,14 @@ def print_summary(score, results, log_file=None):
 
 
 def render_json(
-    score, results, repo_name, verbose=False, exceptions=None, exception_hits=None, today=None
+    score,
+    results,
+    repo_name,
+    verbose=False,
+    exceptions=None,
+    exception_hits=None,
+    today=None,
+    git_sha=None,
 ):
     snippets = _build_exception_snippets(results)
     rules_data = []
@@ -455,6 +512,13 @@ def render_json(
                 for f in sorted(r.findings, key=lambda f: SEVERITY_ORDER.get(f.severity, 99))
             ],
         }
+        reg = _RULE_BY_NAME.get(r.rule, {})
+        if reg.get("display_name"):
+            rule_entry["display_name"] = reg["display_name"]
+        if reg.get("remediation"):
+            rule_entry["remediation"] = reg["remediation"]
+        if reg.get("reference_doc"):
+            rule_entry["reference_doc"] = reg["reference_doc"]
         if verbose and r.files_checked:
             rule_entry["files_checked"] = sorted(set(r.files_checked))
             if r.scan_filters:
@@ -466,6 +530,8 @@ def render_json(
         "score": score,
         "rules": rules_data,
     }
+    if git_sha:
+        data["git_sha"] = git_sha
     if exceptions and exception_hits:
         data["exceptions"] = [
             {
@@ -812,6 +878,19 @@ def _get_repo_name(repo_root):
     return os.path.basename(repo_root)
 
 
+def _get_git_head_sha(repo_root):
+    """Return the HEAD commit SHA, or None if not a git repo."""
+    try:
+        return subprocess.check_output(
+            ["git", "-C", repo_root, "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=15,
+        ).strip()
+    except (subprocess.CalledProcessError, OSError):
+        return None
+
+
 def _load_all_exceptions(args):
     """Load exceptions from central config.
 
@@ -1055,11 +1134,15 @@ def _run(
             f"Provide one -o per --report format, in the same order."
         )
 
+    git_sha = _get_git_head_sha(repo_root)
+
     exc_args = {"exceptions": exceptions, "exception_hits": exception_hits, "today": today}
 
     for i, fmt in enumerate(formats):
         if fmt == "json":
-            report = render_json(score, results, repo_name, verbose=verbose, **exc_args)
+            report = render_json(
+                score, results, repo_name, verbose=verbose, git_sha=git_sha, **exc_args
+            )
         else:
             report = render_markdown(score, results, repo_name, **exc_args)
 

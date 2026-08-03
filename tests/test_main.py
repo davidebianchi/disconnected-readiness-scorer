@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from main import (
+    RULE_REGISTRY,
     ArchAnalyzerError,
     _build_exception_snippets,
     _build_exceptions_section,
@@ -301,6 +302,25 @@ class TestRenderJson:
         r = RuleResult(rule="c", passed=True)
         data = json.loads(render_json("READY", [r], "repo", verbose=True))
         assert "files_checked" not in data["rules"][0]
+
+
+class TestRenderJsonRuleMetadata:
+    def test_rule_entries_include_maturity_metadata(self):
+        results = [RuleResult(rule="no-image-tags", passed=True)]
+        report = json.loads(render_json("READY", results, "org/repo"))
+        rule_entry = report["rules"][0]
+        assert rule_entry["display_name"] == "No mutable image tags"
+        assert isinstance(rule_entry["remediation"], str) and rule_entry["remediation"]
+        assert rule_entry["reference_doc"].startswith("https://")
+        assert "no-image-tags" in rule_entry["reference_doc"]
+
+    def test_unknown_rule_omits_metadata_fields(self):
+        results = [RuleResult(rule="unknown-rule", passed=True)]
+        report = json.loads(render_json("READY", results, "org/repo"))
+        rule_entry = report["rules"][0]
+        assert "display_name" not in rule_entry
+        assert "remediation" not in rule_entry
+        assert "reference_doc" not in rule_entry
 
 
 # --- _render_template_simple ---
@@ -2318,3 +2338,27 @@ class TestExpiredExceptions:
             )
         )
         assert "expired_exceptions" not in data
+
+
+class TestRuleRegistryMetadata:
+    def test_component_rules_have_maturity_fields(self):
+        for alias, entry in RULE_REGISTRY.items():
+            if entry.get("is_manifest_rule"):
+                continue
+            for key in ("display_name", "remediation", "reference_doc"):
+                assert key in entry, f"Rule {alias} missing {key}"
+                assert isinstance(entry[key], str) and entry[key]
+
+    def test_component_rules_reference_doc_is_absolute(self):
+        for alias, entry in RULE_REGISTRY.items():
+            if entry.get("is_manifest_rule"):
+                continue
+            assert entry["reference_doc"].startswith("https://"), (
+                f"Rule {alias} reference_doc not absolute: {entry['reference_doc']}"
+            )
+
+    def test_manifest_rules_have_no_maturity_fields(self):
+        for alias, entry in RULE_REGISTRY.items():
+            if entry.get("is_manifest_rule"):
+                for key in ("display_name", "remediation", "reference_doc"):
+                    assert key not in entry, f"Manifest rule {alias} should not have {key}"

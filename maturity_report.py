@@ -1,0 +1,606 @@
+#!/usr/bin/env python3
+"""Generate an ExternalBatchReport JSON for the component-maturity system.
+
+Reads per-repo disconnected-readiness JSON reports (as produced by run_all.py),
+maps repos to component-maturity catalog IDs via the software catalog's
+repo_mappings.json, and emits a single JSON file conforming to the
+ExternalBatchReport wire format.
+"""
+
+import argparse
+import json
+import logging
+import sys
+from collections import defaultdict
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import NamedTuple
+
+VERSION = "1.0.0"
+
+GITHUB_BASE = "https://github.com"
+REFERENCE_DOC_BASE = (
+    "https://github.com/opendatahub-io/disconnected-readiness-scorer/blob/main/docs/references"
+)
+EXCEPTION_CONFIG_URL = (
+    "https://github.com/opendatahub-io/disconnected-readiness-scorer/blob/main/config/config.yaml"
+)
+
+_EXCEPTION_MARKER = " [Exception: "
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+
+# ─── Rule definitions ──────────────────────────────────────────────
+
+_EXCEPTION_POLICY = {
+    "mechanism": "Path/image pattern match in central config.yaml",
+    "source": {
+        "url": EXCEPTION_CONFIG_URL,
+        "label": "config/config.yaml",
+    },
+}
+
+
+def _build_rule_def(rule_id: str, rule_entries: list[dict]) -> dict:
+    """Build a rule definition from the report data for this rule."""
+    display_name = ""
+    remediation = ""
+    reference_doc = ""
+    for entry in rule_entries:
+        rd = entry["rule_data"]
+        if not display_name and rd.get("display_name"):
+            display_name = rd["display_name"]
+        if not remediation and rd.get("remediation"):
+            remediation = rd["remediation"]
+        if not reference_doc and rd.get("reference_doc"):
+            reference_doc = rd["reference_doc"]
+
+    if not reference_doc:
+        reference_doc = f"{REFERENCE_DOC_BASE}/{rule_id}.md"
+
+    return {
+        "id": rule_id,
+        "name": display_name or rule_id.replace("-", " ").title(),
+        "severity": "blocker",
+        "remediation": remediation or f"See {reference_doc} for guidance.",
+        "reference_doc": reference_doc,
+        "exception_policy": _EXCEPTION_POLICY,
+    }
+
+
+# ─── Repo mappings ─────────────────────────────────────────────────
+
+# When a repo appears at multiple tiers, prefer the tier closest to the
+# productised artifact.  The scanner runs once per repo checkout so only
+# one mapping per repo is meaningful.
+_TIER_PRIORITY: dict[str, int] = {"downstream": 0, "midstream": 1, "upstream": 2}
+
+
+class RepoMapping(NamedTuple):
+    """A single repo-to-component mapping entry."""
+
+    catalog_id: str
+    jira_component: str
+    tier: str
+    path: str  # "" for default/catch-all
+
+
+def _default_repo_mappings_path() -> Path:
+    return Path(__file__).parent / ".github" / "config" / "repo_mappings.json"
+
+
+def load_repo_mappings(path: str) -> dict[str, list[RepoMapping]]:
+    """Load repo_mappings.json and build a repo -> list[RepoMapping] lookup.
+
+    Entries with different paths are preserved as separate mappings.
+    True duplicates (same repo AND same path) are collapsed via tier priority,
+    with a warning logged.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        logger.error("Failed to load repo mappings from %s: %s", path, e)
+        return {}
+
+    mappings_list = data.get("mappings", [])
+    # Build: repo -> {path -> RepoMapping}
+    by_repo: dict[str, dict[str, RepoMapping]] = {}
+    for entry in mappings_list:
+        repo = entry.get("repo", "")
+        jira_component = entry.get("jira_component", "")
+        tier = entry.get("tier") or "midstream"
+        entry_path = entry.get("path", "")
+        if not (repo and jira_component):
+            continue
+
+        catalog_id = jira_component.lower().replace(" ", "-")
+        mapping = RepoMapping(catalog_id, jira_component, tier, entry_path)
+
+        if repo not in by_repo:
+            by_repo[repo] = {}
+
+        key = entry_path
+        if key in by_repo[repo]:
+            existing = by_repo[repo][key]
+            existing_prio = _TIER_PRIORITY.get(existing.tier, 99)
+            new_prio = _TIER_PRIORITY.get(tier, 99)
+            if new_prio < existing_prio:
+                replace = True
+            elif new_prio == existing_prio:
+                # Stable tiebreaker: alphabetically first jira_component
+                replace = jira_component < existing.jira_component
+            else:
+                replace = False
+            logger.warning(
+                "Duplicate repo mapping for %s path=%r (tiers: %s, %s — keeping %s)",
+                repo,
+                entry_path,
+                existing.tier,
+                tier,
+                tier if replace else existing.tier,
+            )
+            if replace:
+                by_repo[repo][key] = mapping
+            continue
+        by_repo[repo][key] = mapping
+
+    return {repo: list(entries.values()) for repo, entries in by_repo.items()}
+
+
+# ─── Location construction ─────────────────────────────────────────
+
+
+def _finding_location(repo_name: str, finding: dict, git_sha: str = "") -> dict | None:
+    """Build an evidence location from a finding.
+
+    Returns None for findings without a file path, since the external report
+    spec requires every evidence location to have a URL.
+    """
+    fpath = finding.get("file", "")
+    if not fpath:
+        return None
+
+    line = finding.get("line", 0)
+    tree = git_sha or "HEAD"
+    url = f"{GITHUB_BASE}/{repo_name}/blob/{tree}/{fpath}"
+
+    if line:
+        label = f"{fpath}:{line}"
+        url += f"#L{line}"
+    else:
+        label = fpath
+
+    loc: dict = {"url": url, "label": label}
+    if line:
+        loc["line"] = line
+
+    return loc
+
+
+# ─── Report building ──────────────────────────────────────────────
+
+
+def _load_repo_reports(reports_dir: str) -> dict[str, dict]:
+    """Load all per-repo JSON reports from a directory.
+
+    Returns: dict of {repo_name: parsed_json}
+    """
+    reports = {}
+    reports_path = Path(reports_dir)
+
+    for json_file in sorted(reports_path.glob("*.json")):
+        if json_file.name in ("summary.json",):
+            continue
+        try:
+            data = json.loads(json_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Skipping %s: %s", json_file.name, e)
+            continue
+
+        repo_name = data.get("repo", "")
+        if not repo_name:
+            logger.warning("Skipping %s: no 'repo' field", json_file.name)
+            continue
+
+        if repo_name in reports:
+            logger.warning(
+                "Duplicate repo %s in report files (%s overwrites previous)",
+                repo_name,
+                json_file.name,
+            )
+        reports[repo_name] = data
+
+    return reports
+
+
+def _match_finding_component(file_path: str, mappings: list[RepoMapping]) -> list[RepoMapping]:
+    """Find the best-matching mapping(s) for a finding's file path.
+
+    Uses longest-prefix match among path-scoped entries.  Falls back to the
+    default (pathless) mapping if no path-scoped entry matches.
+    Returns all mappings at the best match length (handles same-path
+    multi-component cases).
+    """
+    if not file_path:
+        return [m for m in mappings if not m.path] or mappings[:1]
+
+    best_len = 0
+    best: list[RepoMapping] = []
+    for m in mappings:
+        if not m.path:
+            continue
+        prefix = m.path.rstrip("/")
+        if file_path == prefix or file_path.startswith(prefix + "/"):
+            if len(prefix) > best_len:
+                best_len = len(prefix)
+                best = [m]
+            elif len(prefix) == best_len:
+                best.append(m)
+
+    if best:
+        return best
+    return [m for m in mappings if not m.path] or mappings[:1]
+
+
+def _route_repo_to_components(
+    repo_name: str,
+    report_data: dict,
+    mappings: list[RepoMapping],
+) -> dict[str, tuple[str, str, dict]]:
+    """Split a repo's report across components based on path-scoped mappings.
+
+    For repos with only pathless mappings (the common case), the full report is
+    returned as-is.  For repos with path-scoped mappings, each finding is routed
+    to the component whose path prefix best matches the finding's file, and per-
+    component filtered reports are built with recalculated passed/blocker counts.
+
+    Returns: {catalog_id: (component_name, tier, filtered_report)}
+    """
+    has_paths = any(m.path for m in mappings)
+    if not has_paths:
+        m = mappings[0]
+        return {m.catalog_id: (m.jira_component, m.tier, report_data)}
+
+    # Route each finding to its component(s)
+    finding_buckets: dict[str, list[tuple[str, dict]]] = defaultdict(list)
+    all_catalog_ids: dict[str, tuple[str, str]] = {}  # catalog_id -> (name, tier)
+    for m in mappings:
+        all_catalog_ids[m.catalog_id] = (m.jira_component, m.tier)
+
+    for rule in report_data.get("rules", []):
+        rule_name = rule.get("name", "")
+        for finding in rule.get("findings", []):
+            matched = _match_finding_component(finding.get("file", ""), mappings)
+            for m in matched:
+                finding_buckets[m.catalog_id].append((rule_name, finding))
+
+    # Build filtered reports per component
+    result: dict[str, tuple[str, str, dict]] = {}
+    for catalog_id, (name, tier) in all_catalog_ids.items():
+        component_findings = finding_buckets.get(catalog_id, [])
+        findings_by_rule: dict[str, list[dict]] = defaultdict(list)
+        for rule_name, finding in component_findings:
+            findings_by_rule[rule_name].append(finding)
+
+        filtered_rules = []
+        for rule in report_data.get("rules", []):
+            rule_name = rule.get("name", "")
+            my_findings = findings_by_rule.get(rule_name, [])
+            has_blockers = any(f.get("severity") == "blocker" for f in my_findings)
+            filtered_rule = dict(rule)
+            filtered_rule["findings"] = my_findings
+            filtered_rule["passed"] = not has_blockers
+            filtered_rule["blockers"] = sum(
+                1 for f in my_findings if f.get("severity") == "blocker"
+            )
+            filtered_rule["infos"] = sum(1 for f in my_findings if f.get("severity") != "blocker")
+            filtered_rules.append(filtered_rule)
+
+        filtered_report = dict(report_data)
+        filtered_report["rules"] = filtered_rules
+        result[catalog_id] = (name, tier, filtered_report)
+
+    return result
+
+
+def _build_component_data(
+    repo_reports: dict[str, dict],
+    repo_lookup: dict[str, list[RepoMapping]],
+) -> dict:
+    """Group repo reports by catalog_id.
+
+    For repos with path-scoped mappings, findings are routed to the correct
+    component based on file path prefix matching.
+
+    Returns: {catalog_id: {name, repos: [{repo_name, report_data}]}}
+    """
+    components = defaultdict(lambda: {"name": "", "repos": []})
+
+    for repo_name, report_data in repo_reports.items():
+        mappings = repo_lookup.get(repo_name)
+        if not mappings:
+            logger.warning("Repo %s not in repo mappings — skipping", repo_name)
+            continue
+
+        routed = _route_repo_to_components(repo_name, report_data, mappings)
+        for catalog_id, (component_name, tier, filtered_report) in routed.items():
+            components[catalog_id]["name"] = component_name
+            components[catalog_id]["repos"].append(
+                {
+                    "repo_name": repo_name,
+                    "tier": tier,
+                    "report": filtered_report,
+                }
+            )
+
+    return dict(components)
+
+
+def _extract_exception_reasons(findings: list[dict]) -> list[str]:
+    """Extract unique exception reasons from findings with the [Exception: ...] marker."""
+    reasons = []
+    seen: set[str] = set()
+    for f in findings:
+        msg = f.get("message", "")
+        idx = msg.find(_EXCEPTION_MARKER)
+        if idx < 0:
+            continue
+        start = idx + len(_EXCEPTION_MARKER)
+        end = msg.find("]", start)
+        reason = msg[start:end] if end > start else msg[start:]
+        if reason and reason not in seen:
+            reasons.append(reason)
+            seen.add(reason)
+    return reasons
+
+
+def _aggregate_evaluations(
+    catalog_id: str, comp_data: dict, checked_at: str
+) -> tuple[list[dict], list[dict]]:
+    """Build evaluation dicts for one component across all rules."""
+    repo_entries = comp_data["repos"]
+
+    # Pick the first repo (alphabetically) as the representative target
+    first_entry = sorted(repo_entries, key=lambda e: e["repo_name"])[0]
+    target = {
+        "kind": "repository",
+        "name": first_entry["repo_name"],
+        "url": f"{GITHUB_BASE}/{first_entry['repo_name']}",
+    }
+
+    all_rules_seen: dict[str, list[dict]] = {}
+    for entry in repo_entries:
+        for rule in entry["report"].get("rules", []):
+            rule_name = rule.get("name", "")
+            if rule_name not in all_rules_seen:
+                all_rules_seen[rule_name] = []
+            all_rules_seen[rule_name].append(
+                {
+                    "repo_name": entry["repo_name"],
+                    "git_sha": entry["report"].get("git_sha", ""),
+                    "rule_data": rule,
+                }
+            )
+
+    evaluations = []
+    rule_defs = []
+    for rule_id in sorted(all_rules_seen.keys()):
+        rule_entries = all_rules_seen[rule_id]
+        rule_def = _build_rule_def(rule_id, rule_entries)
+
+        all_passed = all(r["rule_data"].get("passed", True) for r in rule_entries)
+        blocker_findings = []
+        excepted_findings = []
+        for r in rule_entries:
+            for f in r["rule_data"].get("findings", []):
+                if f.get("severity") == "blocker":
+                    blocker_findings.append((r["repo_name"], r["git_sha"], f))
+                elif _EXCEPTION_MARKER in f.get("message", ""):
+                    excepted_findings.append(f)
+
+        has_exceptions = len(excepted_findings) > 0
+
+        if all_passed and not has_exceptions:
+            status = "met"
+            detail = f"All repos passed {rule_def['name'].lower()} checks"
+        elif all_passed and has_exceptions:
+            # All blockers were excepted -- factually unmet but waived
+            status = "unmet"
+            detail = (
+                f"{len(excepted_findings)} finding(s) excepted across "
+                f"{', '.join(sorted({r['repo_name'] for r in rule_entries}))}"
+            )
+        else:
+            status = "unmet"
+            count = len(blocker_findings)
+            repos_failing = sorted(
+                {r["repo_name"] for r in rule_entries if not r["rule_data"].get("passed", True)}
+            )
+            detail = (
+                f"{count} blocker(s) in {', '.join(repos_failing)}"
+                if repos_failing
+                else f"{count} blocker(s) found"
+            )
+
+        evaluation: dict = {
+            "rule_id": rule_id,
+            "component_id": catalog_id,
+            "target": target,
+            "status": status,
+            "detail": detail,
+            "checked_at": checked_at,
+        }
+
+        if blocker_findings:
+            evidence = []
+            for repo_name, git_sha, finding in blocker_findings:
+                loc = _finding_location(repo_name, finding, git_sha=git_sha)
+                if loc:
+                    evidence.append(loc)
+                else:
+                    # Findings without a file path still get a repo-level evidence entry
+                    evidence.append(
+                        {
+                            "url": f"{GITHUB_BASE}/{repo_name}",
+                            "label": finding.get("message", repo_name),
+                        }
+                    )
+            if evidence:
+                evaluation["evidence"] = evidence
+
+        if all_passed and has_exceptions:
+            reasons = _extract_exception_reasons(excepted_findings)
+            evaluation["exception"] = {
+                "reason": "; ".join(reasons) if reasons else "configured exception",
+                "location": {
+                    "url": EXCEPTION_CONFIG_URL,
+                    "label": "config/config.yaml",
+                },
+            }
+
+        evaluations.append(evaluation)
+        rule_defs.append(rule_def)
+
+    return evaluations, rule_defs
+
+
+def build_report(
+    reports_dir: str, repo_mappings_path: str, run_url: str, version: str
+) -> dict | None:
+    """Build the full ExternalBatchReport dict."""
+    repo_lookup = load_repo_mappings(repo_mappings_path)
+    if not repo_lookup:
+        logger.error("No repo mappings loaded")
+        return None
+
+    repo_reports = _load_repo_reports(reports_dir)
+    if not repo_reports:
+        logger.warning("No repo reports found in %s", reports_dir)
+
+    now = datetime.now(UTC).isoformat()
+    component_data = _build_component_data(repo_reports, repo_lookup)
+
+    # Build top-level catalogs
+    repos_catalog: dict[str, dict] = {}  # keyed by name
+    components_catalog: list[dict] = []
+
+    for catalog_id, comp_data in sorted(component_data.items()):
+        repo_names = []
+        for entry in comp_data["repos"]:
+            name = entry["repo_name"]
+            repo_names.append(name)
+            if name not in repos_catalog:
+                repo_entry: dict = {
+                    "name": name,
+                    "url": f"{GITHUB_BASE}/{name}",
+                }
+                git_sha = entry["report"].get("git_sha", "")
+                if git_sha:
+                    repo_entry["ref"] = {"value": git_sha, "type": "commit"}
+                repos_catalog[name] = repo_entry
+        components_catalog.append(
+            {
+                "id": catalog_id,
+                "name": comp_data["name"],
+                "repositories": sorted(set(repo_names)),
+            }
+        )
+
+    evaluations = []
+    all_rule_defs: dict[str, dict] = {}
+    for catalog_id, comp_data in sorted(component_data.items()):
+        evals, rule_defs = _aggregate_evaluations(catalog_id, comp_data, now)
+        evaluations.extend(evals)
+        for rd in rule_defs:
+            if rd["id"] not in all_rule_defs:
+                all_rule_defs[rd["id"]] = rd
+
+    source: dict = {
+        "tool": "disconnected-readiness-scorer",
+        "version": version,
+    }
+    if run_url:
+        source["url"] = run_url
+
+    return {
+        "source": source,
+        "scanned_at": now,
+        "repositories": list(repos_catalog.values()),
+        "images": [],
+        "components": components_catalog,
+        "rules": list(all_rule_defs.values()),
+        "evaluations": evaluations,
+    }
+
+
+# ─── CLI ───────────────────────────────────────────────────────────
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Generate ExternalBatchReport JSON for component-maturity",
+    )
+    parser.add_argument(
+        "reports_dir",
+        help="Directory containing per-repo JSON reports from run_all.py",
+    )
+    parser.add_argument(
+        "--output",
+        default="disconnected-readiness-report.json",
+        help="Output JSON path (default: disconnected-readiness-report.json)",
+    )
+    parser.add_argument(
+        "--repo-mappings",
+        default=str(_default_repo_mappings_path()),
+        help="Path to repo_mappings.json (default: .github/config/repo_mappings.json)",
+    )
+    parser.add_argument(
+        "--run-url",
+        default="",
+        help="GitHub Actions run URL",
+    )
+    parser.add_argument(
+        "--version",
+        default=VERSION,
+        help=f"Tool version string (default: {VERSION})",
+    )
+    args = parser.parse_args()
+
+    report = build_report(
+        reports_dir=args.reports_dir,
+        repo_mappings_path=args.repo_mappings,
+        run_url=args.run_url,
+        version=args.version,
+    )
+
+    if report is None:
+        logger.error("Report generation failed")
+        return 1
+
+    with open(args.output, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2)
+
+    total = len(report["evaluations"])
+    unmet = sum(1 for e in report["evaluations"] if e["status"] == "unmet")
+    components = len({e["component_id"] for e in report["evaluations"]})
+    rules_count = len(report.get("rules", []))
+    logger.info("Maturity report: %s", args.output)
+    logger.info(
+        "  Rules: %d | Components: %d | Evaluations: %d | Unmet: %d",
+        rules_count,
+        components,
+        total,
+        unmet,
+    )
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
