@@ -71,6 +71,7 @@ Remove any runtime code that installs packages:
 ```python
 # Remove this pattern — will fail without internet
 import subprocess
+
 subprocess.run(["pip", "install", "some-package"])
 ```
 

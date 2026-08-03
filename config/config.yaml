@@ -126,7 +126,10 @@ exceptions:
   # ---------------------------------------------------------------------------
 
   # --- odh-dashboard ---
-  - rules: "*"
+  - rules:
+      - no-image-tags
+      - image-manifest-complete
+      - no-runtime-egress
     repo: odh-dashboard
     paths:
       - "**/cypress/**"
@@ -136,7 +139,9 @@ exceptions:
       - "**/*.snap.json"
     reason: "Frontend test infrastructure — not deployed in production"
 
-  - rules: "*"
+  - rules:
+      - no-image-tags
+      - image-manifest-complete
     repo: odh-dashboard
     paths:
       - "distributions/*/developing/**"
@@ -221,7 +226,11 @@ exceptions:
     reference: "https://issues.redhat.com/browse/RHOAIENG-69990"
 
   # --- notebooks ---
-  - rules: "*"
+  - rules:
+      - no-image-tags
+      - image-manifest-complete
+      - no-runtime-egress
+      - python-imports-bundled
     repo: notebooks
     paths:
       - "scripts/**"
@@ -305,7 +314,10 @@ exceptions:
     reason: "Module operator controller image is overridden at runtime by opendatahub-operator via ModuleConfig.ControllerImage (RELATED_IMAGE_ODH_KSERVE_MODULE_OPERATOR_IMAGE) → injectModuleEnv, not through params.env. Same pattern as the mcp-lifecycle-module-operator and mlflow-operator exceptions below."
 
   # --- kuberay ---
-  - rules: "*"
+  - rules:
+      - no-image-tags
+      - image-manifest-complete
+      - no-runtime-egress
     repo: kuberay
     paths:
       - "apiserver/**"
@@ -481,7 +493,9 @@ exceptions:
   # (no repo-specific exceptions)
 
   # --- trainer ---
-  - rules: "*"
+  - rules:
+      - no-image-tags
+      - image-manifest-complete
     repo: trainer
     paths:
       - "manifests/base/runtimes/**"
@@ -565,7 +579,9 @@ exceptions:
   # (no repo-specific exceptions)
 
   # --- workload-variant-autoscaler ---
-  - rules: "*"
+  - rules:
+      - no-image-tags
+      - no-runtime-egress
     repo: workload-variant-autoscaler
     paths:
       - "**/kind-emulator/**"
@@ -582,7 +598,9 @@ exceptions:
     reason: "Base manifests and non-namespace-scoped overlays — image placeholders are replaced by the namespace-scoped OpenShift overlay's params.env → configMapGenerator → replacements wiring"
 
   # --- opendatahub-operator ---
-  - rules: "*"
+  - rules:
+      - no-image-tags
+      - image-manifest-complete
     repo: opendatahub-operator
     paths:
       - "**/snapshots/**"
