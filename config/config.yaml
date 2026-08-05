@@ -634,6 +634,12 @@ exceptions:
     reason: "CSV base template placeholder — update-versions.sh overwrites this annotation on every release, and OLM bundle generation (--use-image-digests) produces the final digest-pinned value"
     reference: "https://issues.redhat.com/browse/RHOAIENG-70000"
 
+  - rules: "*"
+    repo: opendatahub-operator
+    paths:
+      - "cmd/manifest-tools/**"
+    reason: "Manifest tools is a development CLI tool — not deployed in production"
+
   # --- mcp-lifecycle-module-operator ---
   - rules:
       - no-image-tags
