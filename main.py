@@ -22,6 +22,7 @@ import jsonschema
 import yaml
 
 from rules.common import ArchAnalyzerResult, ConfigError, Finding, RuleResult, Severity
+from rules.operator_manifest import OPERATOR_REPO_NAME
 from rules.production_scope import compute_production_scope
 
 SEVERITY_ORDER = {"blocker": 0, "info": 1}
@@ -1371,9 +1372,15 @@ def main(argv=None):
             return 0
         return 2 if warnings else 0
 
+    repo_root = os.path.abspath(args.repo_root)
+    is_operator = _get_repo_name(repo_root) == OPERATOR_REPO_NAME
+
     try:
         if args.operator_path:
             return _run(args, args.operator_path)
+
+        if is_operator:
+            return _run(args, repo_root)
 
         with tempfile.TemporaryDirectory(prefix="odh-operator-") as tmp_dir:
             return _run(args, tmp_dir)

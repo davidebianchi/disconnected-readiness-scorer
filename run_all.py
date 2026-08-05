@@ -24,6 +24,8 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+from rules.operator_manifest import OPERATOR_REPO
+
 GITHUB_URL = "https://github.com"
 
 ARCH_ANALYZER_BIN = str((Path(__file__).parent / "bin" / "arch-analyzer").resolve())
@@ -89,7 +91,7 @@ def clone_repo(org, repo, dest):
 
 
 def clone_operator(dest):
-    url = f"{GITHUB_URL}/opendatahub-io/opendatahub-operator.git"
+    url = OPERATOR_REPO
     cmd = [
         "git",
         "clone",
