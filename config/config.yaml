@@ -569,6 +569,15 @@ exceptions:
       - REPLACE_IMAGE:v0.0.0-rhoai-placeholder
     reason: "Test kustomize overlays — not deployed in production"
 
+  - rules: no-image-tags
+    repo: opendatahub-operator
+    paths:
+      - "config/manifests/bases/opendatahub-operator.clusterserviceversion.yaml"
+    images:
+      - "quay.io/opendatahub/opendatahub-operator:*"
+    reason: "CSV base template placeholder — update-versions.sh overwrites this annotation on every release, and OLM bundle generation (--use-image-digests) produces the final digest-pinned value"
+    reference: "https://issues.redhat.com/browse/RHOAIENG-70000"
+
   # --- mcp-lifecycle-module-operator ---
   - rules: no-image-tags
     repo: mcp-lifecycle-module-operator
