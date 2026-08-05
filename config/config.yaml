@@ -489,6 +489,15 @@ exceptions:
     message: "*RELATED_IMAGE_ODH_OGX_CORE_IMAGE*"
     reason: "Wired via kustomize replacements in config/overlays/odh/ and config/overlays/rhoai/ - params.env ConfigMap injects the value into the Deployment env var at render time, but the scanner checks rendered base manifests rather than overlay output"
 
+  - rules: params-env-wiring
+    repo: ogx-k8s-operator
+    paths:
+      - "ogx-module/config/default"
+      - "ogx-module/config/manager"
+    images:
+      - "quay.io/opendatahub/odh-ogx-module-operator:*"
+    reason: "Intermediate kustomize base layers. The actual deployment overlay ogx-module/config/overlays/odh/ wires RELATED_IMAGE_ODH_OGX_MODULE_OPERATOR_IMAGE from params.env via configMapGenerator + replacements into both the manager container and copy-manifests initContainer. The scanner checks base dirs in isolation rather than the leaf overlay."
+
   # --- ogx ---
   # (no repo-specific exceptions)
 
