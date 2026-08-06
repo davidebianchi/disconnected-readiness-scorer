@@ -334,7 +334,13 @@ exceptions:
     reference: "https://issues.redhat.com/browse/RHOAIENG-69996"
 
   # --- trustyai-service-operator ---
-  # (no repo-specific exceptions)
+  - rules: image-manifest-complete
+    repo: trustyai-service-operator
+    paths:
+      - "trustyai-operator-module/pkg/trustyaimodule/images.go"
+    message: "*RELATED_IMAGE_ODH_TRUSTYAI_OPERATOR_IMAGE*"
+    reason: "Module controller uses RELATED_IMAGE_ODH_TRUSTYAI_OPERATOR_IMAGE to resolve the inner operator image; injected by opendatahub-operator ModuleConfig.ControllerImage at deploy time, not via OLM manifest."
+    reference: "https://github.com/trustyai-explainability/trustyai-service-operator/pull/855"
 
   # --- model-registry-operator ---
   - rules:
