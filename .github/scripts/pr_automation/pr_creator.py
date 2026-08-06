@@ -102,6 +102,7 @@ class PRCreator:
         branch_name_suffix: str = "",
         dry_run: bool = False,
         trigger_reason: str = "manual",
+        repo_overrides: dict | None = None,
     ) -> PRCreationResult:
         """Create or update a PR in a repository for disconnected readiness workflow."""
 
@@ -128,9 +129,10 @@ class PRCreator:
                     branch_name_suffix,
                     dry_run,
                     trigger_reason,
+                    repo_overrides,
                 )
             # No existing workflow - create new one
-            return self._create_new_workflow(repo, branch_name_suffix, dry_run)
+            return self._create_new_workflow(repo, branch_name_suffix, dry_run, repo_overrides)
 
         except Exception as e:
             return PRCreationResult(success=False, action="error", reason=str(e))
@@ -144,6 +146,7 @@ class PRCreator:
         branch_name_suffix: str,
         dry_run: bool,
         trigger_reason: str = "manual",
+        repo_overrides: dict | None = None,
     ) -> PRCreationResult:
         """Handle updates to existing workflow while preserving team customizations."""
 
@@ -153,7 +156,7 @@ class PRCreator:
         # Use simple approach: only touch 'with' section, preserve everything else
         try:
             updated_content, update_workflow_result = self.workflow_manager.update_workflow_safe(
-                existing_content, template_content, trigger_reason
+                existing_content, template_content, trigger_reason, repo_overrides
             )
         except Exception as e:
             return PRCreationResult(
@@ -211,12 +214,12 @@ class PRCreator:
         )
 
     def _create_new_workflow(
-        self, repo, branch_name_suffix: str, dry_run: bool
+        self, repo, branch_name_suffix: str, dry_run: bool, repo_overrides: dict | None = None
     ) -> PRCreationResult:
         """Create a new workflow from template."""
 
-        # Generate workflow content from template
-        workflow_content = self.template_renderer.render_workflow_template()
+        # Generate workflow content from template, applying per-repo overrides
+        workflow_content = self.template_renderer.render_workflow_template(repo_overrides)
 
         if dry_run:
             return PRCreationResult(

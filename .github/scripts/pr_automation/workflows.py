@@ -111,12 +111,28 @@ class TemplateRenderer:
     def __init__(self, config: AutomationConfig):
         self.config = config
 
-    def render_workflow_template(self) -> str:
-        """Render workflow template."""
+    def render_workflow_template(self, repo_overrides: dict | None = None) -> str:
+        """Render workflow template, applying per-repo overrides to 'with' params."""
         template_path = self.config.get_workflow_template_path()
 
         with open(template_path) as f:
-            return f.read()
+            content = f.read()
+
+        if not repo_overrides:
+            return content
+
+        yaml = YAML()
+        yaml.preserve_quotes = True
+        yaml.width = 4096
+        data = yaml.load(content)
+        with_section = data["jobs"]["check"].get("with", {})
+        for param_name, value in repo_overrides.items():
+            with_section[param_name] = value
+        data["jobs"]["check"]["with"] = with_section
+
+        output = io.StringIO()
+        yaml.dump(data, output)
+        return output.getvalue()
 
 
 class SimpleWorkflowManager:
@@ -198,7 +214,11 @@ class SimpleWorkflowManager:
         )
 
     def update_workflow_safe(
-        self, existing_content: str, template_content: str, trigger_reason: str | None = None
+        self,
+        existing_content: str,
+        template_content: str,
+        trigger_reason: str | None = None,
+        repo_overrides: dict | None = None,
     ) -> tuple[str, UpdateResult]:
         """
         Update workflow safely with simple rules:
@@ -225,8 +245,23 @@ class SimpleWorkflowManager:
                 current_uses, template_uses, trigger_reason
             )
 
+            # Apply per-repo overrides regardless of propagation decision —
+            # these are config-driven, not version-gated.
+            existing_with = existing["jobs"]["check"].get("with", {})
+            if repo_overrides:
+                for param_name, value in repo_overrides.items():
+                    if param_name not in existing_with:
+                        existing_with[param_name] = value
+                        result.new_parameters.append(param_name)
+                        result.needs_update = True
+
             if not should_propagate:
                 print(f"    Skipping propagation: {propagation_reason}")
+                if result.needs_update:
+                    existing["jobs"]["check"]["with"] = existing_with
+                    output_buffer = io.StringIO()
+                    yaml.dump(existing, output_buffer)
+                    return output_buffer.getvalue(), result
                 return existing_content, result
 
             if current_uses != template_uses:
@@ -237,7 +272,6 @@ class SimpleWorkflowManager:
                 print(f"    Reason: {propagation_reason}")
 
             # 'with' section: ADD missing parameters, REMOVE deprecated ones, preserve team customizations
-            existing_with = existing["jobs"]["check"].get("with", {})
             template_with = template["jobs"]["check"]["with"]
 
             # Dynamic comparison approach: template defines what should exist
@@ -251,8 +285,10 @@ class SimpleWorkflowManager:
                 result.new_parameters.append(param_name)
                 result.needs_update = True
 
-            # Remove deprecated parameters (in existing but not in template)
-            deprecated_params = existing_params - template_params
+            # Remove deprecated parameters (in existing but not in template),
+            # but keep params set via per-repo overrides.
+            override_params = set(repo_overrides.keys()) if repo_overrides else set()
+            deprecated_params = existing_params - template_params - override_params
             for param_name in deprecated_params:
                 del existing_with[param_name]
                 result.removed_parameters.append(param_name)

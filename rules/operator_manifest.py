@@ -22,7 +22,8 @@ RELATED_IMAGE_PATTERN = re.compile(r'"(RELATED_IMAGE_[A-Z0-9_]+)"')
 IMAGE_MAP_PATTERN = re.compile(r'"([^"]+)":\s*"(RELATED_IMAGE_[A-Z0-9_]+)"')
 KNOWN_ISSUES_PATTERN = re.compile(r"- image:\s*(RELATED_IMAGE_[A-Z0-9_]+)")
 
-OPERATOR_REPO = "https://github.com/opendatahub-io/opendatahub-operator.git"
+OPERATOR_REPO_NAME = "opendatahub-io/opendatahub-operator"
+OPERATOR_REPO = f"https://github.com/{OPERATOR_REPO_NAME}.git"
 COMPONENTS_PATH = "internal/controller/components"
 
 # Minimal skip set for the operator repo (no .tox/.devcontainer present).
