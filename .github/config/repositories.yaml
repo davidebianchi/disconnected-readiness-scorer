@@ -42,4 +42,5 @@ included_repositories:
   - opendatahub-io/rhoai-mcp
   - opendatahub-io/rhoai-observability-mcp
   - opendatahub-io/trainer-operator
+  - opendatahub-io/data-connect-hub
   # - opendatahub-io/opendatahub-tests
