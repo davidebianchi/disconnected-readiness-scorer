@@ -30,7 +30,8 @@ included_repositories:
   - opendatahub-io/mlflow-operator
   - opendatahub-io/spark-operator
   - opendatahub-io/workload-variant-autoscaler
-  - opendatahub-io/opendatahub-operator
+  - repo: opendatahub-io/opendatahub-operator
+    operator-path: "${{ github.workspace }}"
   - opendatahub-io/ogx
   - opendatahub-io/mcp-lifecycle-operator
   - opendatahub-io/mcp-lifecycle-module-operator

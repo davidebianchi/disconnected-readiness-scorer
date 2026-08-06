@@ -66,8 +66,9 @@ class DRSAutomation:
             print("FORCE FULL SCAN: Ignoring state optimization")
         print("=" * 60)
 
-        # Load inclusion list for phased rollout
+        # Load inclusion list and per-repo config for phased rollout
         inclusions = self.config.load_inclusions()
+        repo_configs = self.config.load_repo_configs()
 
         # Handle template change detection
         if trigger_reason == "template_change":
@@ -193,6 +194,7 @@ class DRSAutomation:
                                 else "",
                                 dry_run=dry_run,
                                 trigger_reason=trigger_reason,
+                                repo_overrides=repo_configs.get(repo.full_name),
                             )
 
                             if result.action == "skipped":

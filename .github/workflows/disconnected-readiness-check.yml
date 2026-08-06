@@ -11,6 +11,11 @@ on:
         required: false
         type: string
         default: ""
+      operator-path:
+        description: "Path to a local opendatahub-operator checkout to use instead of cloning main (e.g. for operator PR checks)"
+        required: false
+        type: string
+        default: ""
   workflow_dispatch:
     inputs:
       rules:
@@ -45,6 +50,7 @@ jobs:
       - name: Run disconnected readiness check
         env:
           INPUT_RULES: ${{ inputs.rules }}
+          INPUT_OPERATOR_PATH: ${{ inputs.operator-path }}
         run: |
           cd scorer
 
@@ -52,6 +58,9 @@ jobs:
           ARGS=("${{ github.workspace }}" --report json,markdown -o disconnected-report.json disconnected-report.md)
           if [ -n "$INPUT_RULES" ]; then
             ARGS+=(--rules "$INPUT_RULES")
+          fi
+          if [ -n "$INPUT_OPERATOR_PATH" ]; then
+            ARGS+=(--operator-path "$INPUT_OPERATOR_PATH")
           fi
 
           # Run analysis and capture JSON output
