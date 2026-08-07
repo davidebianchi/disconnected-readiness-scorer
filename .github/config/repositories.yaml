@@ -31,7 +31,7 @@ included_repositories:
   - opendatahub-io/spark-operator
   - opendatahub-io/workload-variant-autoscaler
   - repo: opendatahub-io/opendatahub-operator
-    operator-path: "${{ github.workspace }}"
+    operator-path: "."
   - opendatahub-io/ogx
   - opendatahub-io/mcp-lifecycle-operator
   - opendatahub-io/mcp-lifecycle-module-operator
