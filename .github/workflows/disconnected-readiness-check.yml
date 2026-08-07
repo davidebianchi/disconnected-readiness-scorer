@@ -60,7 +60,13 @@ jobs:
             ARGS+=(--rules "$INPUT_RULES")
           fi
           if [ -n "$INPUT_OPERATOR_PATH" ]; then
-            ARGS+=(--operator-path "$INPUT_OPERATOR_PATH")
+            # Resolve against workspace and reject paths that escape it
+            OPERATOR_RESOLVED="$(realpath -m "${{ github.workspace }}/$INPUT_OPERATOR_PATH")"
+            if [[ "$OPERATOR_RESOLVED" != "${{ github.workspace }}" && "$OPERATOR_RESOLVED" != "${{ github.workspace }}/"* ]]; then
+              echo "ERROR: operator-path resolves outside workspace: $OPERATOR_RESOLVED" >&2
+              exit 1
+            fi
+            ARGS+=(--operator-path "$OPERATOR_RESOLVED")
           fi
 
           # Run analysis and capture JSON output
