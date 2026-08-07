@@ -797,6 +797,15 @@ exceptions:
   - rules: no-image-tags
     repo: data-connect-hub
     paths:
+      - "dc-controller/chart/**"
+    images:
+      - "ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest"
+      - "ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest"
+    reason: "Helm chart default values — overridden at runtime by opendatahub-operator with digest-pinned images from Build-Config"
+
+  - rules: no-image-tags
+    repo: data-connect-hub
+    paths:
       - "dc-controller/.github/workflows/lint.yml"
       - "dc-controller/.github/workflows/test.yml"
     reason: "GitHub Actions workflow steps pinned to commit SHAs — CI infrastructure, not container images deployed in production"
