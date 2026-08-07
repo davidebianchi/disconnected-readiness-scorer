@@ -762,3 +762,41 @@ exceptions:
       - "manifests/trainer/overlays/kubeflow-platform/**"
       - "manifests/trainer/overlays/runtimes/**"
     reason: "Upstream Kubeflow community overlays — only used by the kubeflow-platform deployment path, not by RHOAI (operator uses manifests/trainer/rhoai/ directly)"
+
+  # --- data-connect-hub ---
+  - rules: no-image-tags
+    repo: data-connect-hub
+    paths:
+      - "dc-controller/cmd/**"
+      - "dc-controller/internal/controller/**"
+    images:
+      - "ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest"
+      - "ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest"
+    reason: "Default fallback images — overridden at runtime via RELATED_IMAGE_ODH_DCH_REST_SERVICE and RELATED_IMAGE_ODH_DCH_FLIGHT_SERVICE env vars, wired through params.env with digest-pinned images from Build-Config"
+
+  - rules: no-image-tags
+    repo: data-connect-hub
+    paths:
+      - "dc-controller/config/manager/**"
+    images:
+      - "controller:latest"
+      - "ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest"
+      - "ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest"
+    reason: "Kubebuilder scaffold defaults — controller image set by opendatahub-operator ModuleConfig.ControllerImage; RELATED_IMAGE env var values injected by opendatahub-operator from Build-Config digests at deployment time"
+
+  - rules: no-image-tags
+    repo: data-connect-hub
+    paths:
+      - "config/base/*/deployment.yaml"
+    images:
+      - "ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest"
+      - "ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest"
+    reason: "Base kustomize manifest placeholders — controller's reconcileService() injects kustomize Image overrides from RELATED_IMAGE_* env vars before rendering, replacing tags with digest-pinned images at runtime"
+
+
+  - rules: no-image-tags
+    repo: data-connect-hub
+    paths:
+      - "dc-controller/.github/workflows/lint.yml"
+      - "dc-controller/.github/workflows/test.yml"
+    reason: "GitHub Actions workflow steps pinned to commit SHAs — CI infrastructure, not container images deployed in production"
