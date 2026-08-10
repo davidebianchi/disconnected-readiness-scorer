@@ -1324,8 +1324,7 @@ class TestApplyExceptions:
         exc = [
             e
             for e in all_exc
-            if isinstance(e, dict)
-            and e.get("repo") == "llama-stack-provider-trustyai-garak"
+            if isinstance(e, dict) and e.get("repo") == "llama-stack-provider-trustyai-garak"
         ]
         assert len(exc) == 1
         return exc
@@ -1386,8 +1385,7 @@ class TestApplyExceptions:
                         "blocker",
                         "src/llama_stack_provider_trustyai_garak/constants.py",
                         6,
-                        "quay.io/trustyai/trustyai-garak-lls-provider-dsp-extra@sha256:"
-                        + "b" * 64,
+                        "quay.io/trustyai/trustyai-garak-lls-provider-dsp-extra@sha256:" + "b" * 64,
                         "hardcoded image",
                     ),
                 ],
