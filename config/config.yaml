@@ -39,6 +39,7 @@ exceptions:
       - "**/testdata/**"
       - "**/testing/**"
       - "**/*e2e*/**"
+      - "**/mock/**"
       - "**/mocks/**"
       - "**/hack/**"
       - "**/fixture/**"
@@ -195,16 +196,6 @@ exceptions:
       - "packages/notebooks/upstream/workspaces/frontend/manifests/kustomize/base/kustomization.yaml"
     reason: "Upstream base kustomize manifest — image is unused as bff manifests would replace this field"
     reference: "https://issues.redhat.com/browse/RHOAIENG-69988"
-
-  - rules:
-      - image-manifest-complete
-      - no-image-tags
-    repo: odh-dashboard
-    paths:
-      - "packages/agent-ops/bff/internal/integrations/agents/mock/**"
-    images:
-      - "quay.io/example/*"
-    reason: "Mock demo client with placeholder example images — not deployed in production"
 
   - rules: no-runtime-egress
     repo: odh-dashboard
@@ -488,7 +479,6 @@ exceptions:
       - "infra/feast-operator/internal/controller/services/services_types.go"
     message: "*RELATED_IMAGE_CRON_JOB*"
     reason: "RELATED_IMAGE_CRON_JOB env var for feast-operator CronJob image — opendatahub-operator manifest wiring pending"
-    expires: "2027-02-10"
 
   # --- ogx-k8s-operator ---
   - rules:
@@ -787,7 +777,6 @@ exceptions:
       - "internal/controller/params.go"
     message: "*RELATED_IMAGE_ODH_TRAINING*"
     reason: "RELATED_IMAGE env vars for training runtime and universal workbench images — opendatahub-operator manifest wiring pending"
-    expires: "2027-02-10"
 
   - rules: image-manifest-complete
     repo: trainer-operator
@@ -795,7 +784,6 @@ exceptions:
       - "internal/controller/params.go"
     message: "*RELATED_IMAGE_ODH_TH06*"
     reason: "RELATED_IMAGE env vars for TH06 (Torch 2.10) runtime images — opendatahub-operator manifest wiring pending"
-    expires: "2027-02-10"
 
   # --- data-connect-hub ---
   - rules: no-image-tags
@@ -841,6 +829,5 @@ exceptions:
     paths:
       - "src/llama_stack_provider_trustyai_garak/constants.py"
     images:
-      - "quay.io/trustyai/trustyai-garak-lls-provider-dsp*"
+      - "quay.io/trustyai/trustyai-garak-lls-provider-dsp@sha256:*"
     reason: "Hardcoded digest-pinned DSP provider image — opendatahub-operator RELATED_IMAGE_* wiring pending for this component"
-    expires: "2027-02-10"
