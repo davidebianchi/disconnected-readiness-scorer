@@ -35,6 +35,16 @@ All releases follow semantic versioning (semver) format: `v{MAJOR}.{MINOR}.{PATC
 | `v2` | Latest v2.x.x | Any v2.x.x release | Breaking changes from v1 |
 | `v3` | Latest v3.x.x | Any v3.x.x release | Breaking changes from v2 |
 
+## What Pinning Does and Does Not Cover
+
+Pinning a consumer's `uses:` line (`@v1`, `@v1.2.3`, or a SHA) selects a version of the **reusable workflow file itself** — its steps and argument-building logic. It does not pin the scorer's Python code, and it does not pin `schemas/config.schema.json` either.
+
+Inside the reusable workflow, the step that checks out the scorer's code (rules, `main.py`, `schemas/config.schema.json`, etc.) always uses the floating `v1` tag, regardless of which tier the caller's `uses:` line resolves to. This is deliberate: this repository's own automation (`create-drs-prs.yml`) is what writes and maintains the workflow file in every consumer repo, and it always writes `@v1`. Consumers are not expected to hand-edit that reference to a different tier. The actual gate on when new scorer code and its schema reach consumers is the release process itself — someone moving the `v1` tag forward — not a consumer's choice of pin.
+
+`config/config.yaml` (exceptions, `docker_contexts`, `known_non_image_prefixes`, `params_env_filenames`) is **always fetched from `main`** at run time, regardless of which ref a consumer pins — including SHA-pinned consumers. Only the `exceptions` list carries a no-new-failure guarantee: it can only downgrade a `blocker` finding to `info`, never create a new finding or raise severity, so a live change to `exceptions` can't surprise a pinned consumer with a failure it didn't already have. The other three keys change scan behavior directly and can introduce findings that did not exist before: `docker_contexts` and `params_env_filenames` can widen which files or overlay directories get scanned, and narrowing or removing an entry in `known_non_image_prefixes` can un-suppress matches that were previously filtered out. A merged `exceptions` entry takes effect on the very next run, with no release required.
+
+If `main`'s config references something the pinned code doesn't support (for example, an exception naming a rule that doesn't exist yet in that release's rule set), the run fails loudly with a validation error — there is no silent skip. The fix in that case is to release the **code** that understands the new config, not to work around it.
+
 ## Consumer Usage Patterns
 
 ### Recommended: Floating Major Version
@@ -56,10 +66,11 @@ uses: opendatahub-io/disconnected-readiness-scorer/.github/workflows/disconnecte
 ```
 
 **Benefits:**
-- Complete control over version changes
-- Predictable, unchanging behavior
+- Complete control over which version of the workflow's orchestration logic runs
 - Manual work for security updates
 - Manual work for bug fixes
+
+**Not covered:** the scorer code this workflow checks out still tracks the floating `v1` tag internally — see [What Pinning Does and Does Not Cover](#what-pinning-does-and-does-not-cover). This tier is not the supported consumer pattern (see that section) and is not exercised by `create-drs-prs.yml`.
 
 ### Security-Focused: SHA Pinning
 ```yaml
@@ -68,10 +79,11 @@ uses: opendatahub-io/disconnected-readiness-scorer/.github/workflows/disconnecte
 ```
 
 **Benefits:**
-- Immutable, cannot be tampered with
-- Maximum supply chain security
-- No automatic security updates
+- The workflow file's orchestration logic is immutable and cannot be tampered with
+- No automatic security updates to that logic
 - Requires manual SHA updates
+
+**Not covered:** this immutability applies to the workflow file only, not the scorer code it checks out (still tracks floating `v1`) or `config/config.yaml` (still fetched live from `main`) — see [What Pinning Does and Does Not Cover](#what-pinning-does-and-does-not-cover). This tier is not the supported consumer pattern and is not exercised by `create-drs-prs.yml`.
 
 ## Security Considerations
 

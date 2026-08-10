@@ -8,6 +8,8 @@ The release process is designed to balance two key requirements:
 1. **Reproducibility**: Deterministic builds that consumers can rely on
 2. **Ease of adoption**: Consumers get updates without manual intervention
 
+**Changes to `config/config.yaml` do not require a release, except when the change references a rule name or schema field not yet supported by the currently-released code** — that case does need a release, of the code, before the config change reaches consumers cleanly (see below). Otherwise, `config/config.yaml` is always fetched live from `main` by the reusable workflow, for every consumer regardless of pin style — a merged exception takes effect on the very next run. A release is only needed for changes to the scorer's Python code, rule logic, workflow YAML, or `schemas/config.schema.json` — or for a config change that depends on one of those. See [VERSIONING.md](VERSIONING.md#what-pinning-does-and-does-not-cover) for details.
+
 ## Cutting a New Release
 
 ### Prerequisites
@@ -241,6 +243,21 @@ git tag --list | grep "v1\."
 # Use next available version
 # If v1.2.3 exists, use v1.2.4 or v1.3.0 depending on change type
 ```
+
+#### "Do I need to release for my config.yaml exception to take effect?"
+
+Usually no. `config/config.yaml` is fetched live from `main` on every run of the reusable workflow, independent of any tag or SHA a consumer pins. Once your exception PR is merged to `main`, the very next run of a consumer's check picks it up — no release, no tag move. If a consumer still isn't seeing a just-merged exception, the exception itself likely doesn't match the finding (wrong `rules`/`paths`/`images`/`message`) rather than a stale release. The one exception to "no release needed": if your `config.yaml` change references a rule name or schema field the currently-released code doesn't know about yet, that combination fails hard on the next run for every consumer until a release ships the code that understands it — see [VERSIONING.md](VERSIONING.md#what-pinning-does-and-does-not-cover).
+
+#### "How do I test an in-flight config.yaml or workflow change to this repo before merging it?"
+
+A `config/config.yaml` content change is already tested by `readiness-summary.yml`, which runs on every pull request to this repo: it checks out your PR's own commit (code and config together) and scores real target repos with it via `run_all.py`, so a config change referencing an unsupported rule name or schema field fails that run before merge.
+
+A change to `disconnected-readiness-check.yml`'s own orchestration logic (its steps, checkout targets, argument wiring) is not exercised by any automatic PR check, since no workflow in this repo invokes it. Use its `workflow_dispatch` trigger to run it directly against your feature branch before merging — targeting whichever repository your branch was actually pushed to (a fork if you're contributing from one, or `opendatahub-io/disconnected-readiness-scorer` if you pushed the branch there directly): a `workflow_dispatch` run reads the workflow definition from the `--ref` you give it, and that ref must exist in the `--repo` you target, so pointing at `opendatahub-io/disconnected-readiness-scorer` while your branch only exists on your fork will fail to find it:
+```bash
+gh workflow run disconnected-readiness-check.yml --ref <feature-branch> --repo <owner>/disconnected-readiness-scorer
+gh run watch --repo <owner>/disconnected-readiness-scorer
+```
+This runs the workflow's own logic as it exists on your branch, fetching `config/config.yaml` from `main` exactly as a real consumer would — that fetch is not something to override for this test, since real consumers never point it anywhere else.
 
 #### Floating Tag Update Issues
 

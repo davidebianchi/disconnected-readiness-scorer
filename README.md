@@ -179,6 +179,8 @@ exceptions:
     reason: "Test directory — not deployed in production"
 ```
 
+A missing config file — whether the default path or an explicitly passed `--config` path — is a hard error: the run fails immediately rather than silently proceeding with zero exceptions.
+
 ### Configuration
 
 All configuration is managed centrally in `config/config.yaml`. No per-repository configuration files are supported — repo-specific exceptions use the `repo` field in the central config.
@@ -298,6 +300,8 @@ This repository uses **floating major version tags** for automatic updates while
 # Recommended: Automatic updates within major version
 uses: opendatahub-io/disconnected-readiness-scorer/.github/workflows/disconnected-readiness-check.yml@v1
 ```
+
+Pinning only governs the reusable workflow file's own orchestration logic — it does not pin the scorer's Python code or `schemas/config.schema.json` (both always come from the workflow's own internal floating `v1` checkout, regardless of the caller's pin) or `config/config.yaml` (exceptions, always fetched live from `main`), so a merged exception reaches every consumer on its next run without any release. See [docs/VERSIONING.md](docs/VERSIONING.md#what-pinning-does-and-does-not-cover) for details.
 
 **Complete Documentation:**
 - **[docs/VERSIONING.md](docs/VERSIONING.md)** - Consumer strategy guide (when to use @v1 vs @v1.2.3 vs @sha)
