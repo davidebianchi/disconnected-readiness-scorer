@@ -1,10 +1,12 @@
 """Tests for main.py orchestrator functions."""
 
+import io
 import json
 import sys
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -25,6 +27,7 @@ from main import (
     _normalize_rules,
     _render_template_simple,
     _rules_display_str,
+    _run,
     _run_arch_analyzer,
     _validate_config_schema,
     adapt_manifest_result,
@@ -417,6 +420,153 @@ class TestMain:
         assert exit_code == 1
 
     @patch("main.compute_production_scope", return_value=None)
+    def test_config_flag_applies_exception_through_real_scan(self, _mock_scope, tmp_path):
+        """--config must drive apply_exceptions() inside the real _run() scan path,
+        not just be recognized by argparse -- see RHOAIENG-79773."""
+        fake_mod = MagicMock()
+        fake_mod.run.return_value = RuleResult(
+            rule="image-manifest-complete",
+            passed=False,
+            findings=[Finding("blocker", "f.go", 1, "img", "fail")],
+        )
+        fake_mod.detect_image_pattern.return_value = "static_csv"
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            "exceptions:\n"
+            "  - rules: image-manifest-complete\n"
+            "    message: fail\n"
+            "    reason: test exception\n"
+        )
+
+        out_file = tmp_path / "report.json"
+        with (
+            patch("main._run_arch_analyzer", return_value=None),
+            patch("importlib.import_module", side_effect=_make_import_side_effect(fake_mod)),
+        ):
+            exit_code = main(
+                [
+                    ".",
+                    "--rules",
+                    "csv",
+                    "--config",
+                    str(config_path),
+                    "--report",
+                    "json",
+                    "-o",
+                    str(out_file),
+                ]
+            )
+        assert exit_code == 0
+        data = json.loads(out_file.read_text())
+        finding = data["rules"][0]["findings"][0]
+        assert finding["severity"] == "info"
+        assert "[Exception: test exception]" in finding["message"]
+
+    @patch("main.compute_production_scope", return_value=None)
+    def test_config_flag_with_unsupported_rule_fails_hard(self, _mock_scope, tmp_path):
+        """A live config referencing a rule name the running code doesn't know about
+        must abort the run loudly, never silently skip -- see RHOAIENG-79773."""
+        fake_mod = MagicMock()
+        fake_mod.run.return_value = RuleResult(rule="image-manifest-complete", passed=True)
+        fake_mod.detect_image_pattern.return_value = "static_csv"
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            "exceptions:\n"
+            "  - rules: rule-that-does-not-exist\n"
+            "    message: fail\n"
+            "    reason: test exception\n"
+        )
+
+        with (
+            patch("main._run_arch_analyzer", return_value=None),
+            patch("importlib.import_module", side_effect=_make_import_side_effect(fake_mod)),
+        ):
+            exit_code = main(
+                [".", "--rules", "csv", "--config", str(config_path), "--report", "json"]
+            )
+        assert exit_code == 1
+
+    @patch("main.compute_production_scope", return_value=None)
+    def test_config_flag_with_nonexistent_path_fails_hard(self, _mock_scope, tmp_path, capsys):
+        """A --config path that doesn't exist must abort the run loudly, never
+        silently fall back to zero exceptions -- see RHOAIENG-79773."""
+        fake_mod = MagicMock()
+        fake_mod.run.return_value = RuleResult(rule="image-manifest-complete", passed=True)
+        fake_mod.detect_image_pattern.return_value = "static_csv"
+
+        missing_config_path = tmp_path / "does-not-exist.yaml"
+
+        with (
+            patch("main._run_arch_analyzer", return_value=None),
+            patch("importlib.import_module", side_effect=_make_import_side_effect(fake_mod)),
+        ):
+            exit_code = main(
+                [".", "--rules", "csv", "--config", str(missing_config_path), "--report", "json"]
+            )
+        assert exit_code == 1
+        assert "Config file not found" in capsys.readouterr().err
+
+    @patch("main.compute_production_scope", return_value=None)
+    def test_run_uses_supplied_central_cfg_without_loading_from_disk(self, _mock_scope, tmp_path):
+        """_run(..., central_cfg=...) must apply the caller-supplied config directly
+        and never call load_central_config() itself -- this is the contract main()
+        relies on to load the config exactly once for every CLI mode. Mirrors
+        run_all.py's direct _run() call shape (see tests/test_run_all.py) but
+        supplies a pre-built central_cfg the way main() now does."""
+        fake_mod = MagicMock()
+        fake_mod.run.return_value = RuleResult(
+            rule="image-manifest-complete",
+            passed=False,
+            findings=[Finding("blocker", "f.go", 1, "img", "fail")],
+        )
+        fake_mod.detect_image_pattern.return_value = "static_csv"
+
+        supplied_central_cfg = {
+            "exceptions": [
+                {
+                    "rules": "image-manifest-complete",
+                    "message": "fail",
+                    "reason": "test exception",
+                }
+            ],
+            "docker_contexts": {},
+            "known_non_image_prefixes": [],
+            "params_env_filenames": {},
+        }
+
+        args = SimpleNamespace(
+            repo_root=str(tmp_path),
+            rules="csv",
+            report="json",
+            output=[str(tmp_path / "report.json")],
+            operator_path=None,
+            config=None,
+            repo_config=None,
+            no_production_scope=False,
+            verbose=False,
+            arch_analyzer="",
+        )
+
+        with (
+            patch("main.load_central_config", side_effect=AssertionError("must not be called")),
+            patch("main._run_arch_analyzer", return_value=None),
+            patch("importlib.import_module", side_effect=_make_import_side_effect(fake_mod)),
+        ):
+            exit_code = _run(
+                args,
+                None,
+                central_cfg=supplied_central_cfg,
+                log_stream=io.StringIO(),
+            )
+        assert exit_code == 0
+        data = json.loads((tmp_path / "report.json").read_text())
+        finding = data["rules"][0]["findings"][0]
+        assert finding["severity"] == "info"
+        assert "[Exception: test exception]" in finding["message"]
+
+    @patch("main.compute_production_scope", return_value=None)
     def test_output_flag_writes_file(self, _mock_scope, tmp_path):
         fake_mod = MagicMock()
         fake_mod.run.return_value = RuleResult(rule="r", passed=True)
@@ -645,8 +795,9 @@ class TestLoadExceptions:
         assert len(result) == 1
         assert result[0]["rules"] == "no-runtime-egress"
 
-    def test_missing_file_returns_empty(self, tmp_path):
-        assert load_exceptions(str(tmp_path / "nope.yaml")) == []
+    def test_missing_file_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="Config file not found"):
+            load_exceptions(str(tmp_path / "nope.yaml"))
 
     def test_empty_exceptions_returns_empty(self, tmp_path):
         exc_file = tmp_path / "exceptions.yaml"
@@ -1381,11 +1532,11 @@ class TestParseArgsExceptions:
 
 
 class TestLoadCentralConfig:
-    def test_missing_file_returns_defaults(self, tmp_path):
+    def test_missing_file_raises(self, tmp_path):
         from main import load_central_config
 
-        cfg = load_central_config(str(tmp_path / "nope.yaml"))
-        assert cfg["exceptions"] == []
+        with pytest.raises(ValueError, match="Config file not found"):
+            load_central_config(str(tmp_path / "nope.yaml"))
 
     def test_present_file_has_all_keys(self, tmp_path):
         from main import load_central_config
@@ -2140,6 +2291,15 @@ class TestListExpiring:
     def test_list_expiring_default_false(self):
         args = parse_args(["."])
         assert args.list_expiring is False
+
+    def test_list_expiring_with_nonexistent_config_fails_hard(self, tmp_path, capsys):
+        """--list-expiring must abort loudly on a bad --config, matching
+        --audit-exceptions and the normal scan path -- see RHOAIENG-79773."""
+        missing_config_path = tmp_path / "does-not-exist.yaml"
+
+        exit_code = main([".", "--list-expiring", "--config", str(missing_config_path)])
+        assert exit_code == 1
+        assert "Config file not found" in capsys.readouterr().err
 
     def test_list_expiring_no_expiring_returns_zero(self, tmp_path, capsys):
         cfg = tmp_path / "config.yaml"

@@ -123,9 +123,9 @@ DEFAULT_RULES = [k for k, v in RULE_REGISTRY.items() if not v.get("is_manifest_r
 
 
 def _load_yaml_file(config_path):
-    """Load a YAML file, returning parsed dict or None if missing."""
+    """Load a YAML file, raising if the path doesn't exist."""
     if not Path(config_path).exists():
-        return None
+        raise ValueError(f"Config file not found: {config_path}")
     try:
         text = Path(config_path).read_text()
     except OSError as exc:
@@ -153,8 +153,6 @@ def _validate_config_schema(raw, config_path):
 
 def load_central_config(config_path):
     raw = _load_yaml_file(config_path)
-    if raw is None:
-        return {"exceptions": []}
     if not isinstance(raw, dict):
         raise ValueError(f"{config_path} must be a YAML mapping, got {type(raw).__name__}")
     for exc in raw.get("exceptions") or []:
@@ -1020,16 +1018,6 @@ def _get_git_head_sha(repo_root):
         return None
 
 
-def _load_all_exceptions(args):
-    """Load exceptions from central config.
-
-    Returns (exceptions, error_result_or_None).
-    """
-    config_path = args.config or str(Path(__file__).parent / CENTRAL_CONFIG_PATH)
-    central = load_central_config(config_path)
-    return central["exceptions"], None
-
-
 def _run_arch_analyzer(arch_analyzer_bin: str, target_dir: str) -> ArchAnalyzerResult:
     """Extract arch-analyzer JSON for a directory.
 
@@ -1083,12 +1071,15 @@ def _run(
     manifest_env_vars=None,
     operator_arch_data=None,
     log_stream=None,
+    central_cfg=None,
 ):
     """Run all selected rules on a repo and produce reports.
 
     Optional keyword args allow callers (e.g. run_all.py) to pass
     pre-computed operator data to avoid redundant work across repos.
     *log_stream* overrides sys.stderr for diagnostic output (thread-safe).
+    *central_cfg*, if provided, skips this function's own config load —
+    used by main() to load+validate the config exactly once for all CLI modes.
     """
     repo_root = os.path.abspath(args.repo_root)
     repo_name = _get_repo_name(repo_root)
@@ -1107,8 +1098,9 @@ def _run(
     _vlog(f"Selected rules: {selected}")
 
     # --- Central config (loaded once, used for exceptions + detect_params_env) ---
-    _central_config_path = args.config or str(Path(__file__).parent / CENTRAL_CONFIG_PATH)
-    central_cfg = load_central_config(_central_config_path)
+    if central_cfg is None:
+        _central_config_path = args.config or str(Path(__file__).parent / CENTRAL_CONFIG_PATH)
+        central_cfg = load_central_config(_central_config_path)
     docker_contexts = central_cfg.get("docker_contexts", {}).get(repo_name, {})
     if not docker_contexts:
         docker_contexts = central_cfg.get("docker_contexts", {}).get(repo_name.split("/")[-1], {})
@@ -1288,9 +1280,17 @@ def _run(
 def main(argv=None):
     args = parse_args(argv)
 
-    if args.list_expiring:
-        config_path = args.config or str(Path(__file__).parent / CENTRAL_CONFIG_PATH)
+    # Loaded once here, before any CLI mode branches, so every mode that needs
+    # central_cfg (list-expiring, audit-exceptions, scan) fails the same way on
+    # an invalid --config instead of each mode guarding this call independently.
+    config_path = args.config or str(Path(__file__).parent / CENTRAL_CONFIG_PATH)
+    try:
         central_cfg = load_central_config(config_path)
+    except (ConfigError, ValueError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    if args.list_expiring:
         exceptions = central_cfg["exceptions"]
         dummy_hits = [0] * len(exceptions)
         today = date.today()
@@ -1330,12 +1330,6 @@ def main(argv=None):
         return 2
 
     if args.audit_exceptions:
-        config_path = args.config or str(Path(__file__).parent / CENTRAL_CONFIG_PATH)
-        try:
-            central_cfg = load_central_config(config_path)
-        except (ConfigError, ValueError) as exc:
-            print(f"ERROR: {exc}", file=sys.stderr)
-            return 1
         exceptions = central_cfg["exceptions"]
         audit_findings = _audit_exceptions(exceptions)
         warnings = [f for f in audit_findings if f["level"] == "warning"]
@@ -1373,10 +1367,10 @@ def main(argv=None):
 
     try:
         if args.operator_path:
-            return _run(args, args.operator_path)
+            return _run(args, args.operator_path, central_cfg=central_cfg)
 
         with tempfile.TemporaryDirectory(prefix="odh-operator-") as tmp_dir:
-            return _run(args, tmp_dir)
+            return _run(args, tmp_dir, central_cfg=central_cfg)
     except (ArchAnalyzerError, ConfigError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
