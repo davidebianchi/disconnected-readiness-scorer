@@ -775,13 +775,6 @@ exceptions:
     repo: trainer-operator
     paths:
       - "internal/controller/params.go"
-    message: "*RELATED_IMAGE_ODH_TRAINING*"
-    reason: "RELATED_IMAGE env vars for training runtime and universal workbench images — opendatahub-operator manifest wiring pending"
-
-  - rules: image-manifest-complete
-    repo: trainer-operator
-    paths:
-      - "internal/controller/params.go"
     message: "*RELATED_IMAGE_ODH_TH06*"
     reason: "RELATED_IMAGE env vars for TH06 (Torch 2.10) runtime images — opendatahub-operator manifest wiring pending"
 
