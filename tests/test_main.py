@@ -1466,6 +1466,85 @@ class TestApplyExceptions:
         apply_exceptions(results, rhoai_mcp_exceptions, "rhoai-mcp")
         assert results[0].findings[0].severity == "blocker"
 
+    # --- garak: loaded from production config/config.yaml ---
+
+    @pytest.fixture()
+    def garak_exceptions(self):
+        cfg_path = str(Path(__file__).parent.parent / "config" / "config.yaml")
+        all_exc = load_exceptions(cfg_path)
+        exc = [
+            e
+            for e in all_exc
+            if isinstance(e, dict) and e.get("repo") == "llama-stack-provider-trustyai-garak"
+        ]
+        assert len(exc) == 1
+        return exc
+
+    def test_garak_digest_pinned_image_matched(self, garak_exceptions):
+        results = [
+            RuleResult(
+                rule="image-manifest-complete",
+                passed=False,
+                findings=[
+                    Finding(
+                        "blocker",
+                        "src/llama_stack_provider_trustyai_garak/constants.py",
+                        6,
+                        "quay.io/trustyai/trustyai-garak-lls-provider-dsp@sha256:c960230103493b8dece955012b0a34105c185dd4ac5a3034460b50efa8303084",
+                        "hardcoded image",
+                    ),
+                ],
+            )
+        ]
+        apply_exceptions(results, garak_exceptions, "llama-stack-provider-trustyai-garak")
+        assert results[0].findings[0].severity == "info"
+
+    def test_garak_tagged_image_not_matched(self, garak_exceptions):
+        results = [
+            RuleResult(
+                rule="image-manifest-complete",
+                passed=False,
+                findings=[
+                    Finding(
+                        "blocker",
+                        "src/llama_stack_provider_trustyai_garak/constants.py",
+                        6,
+                        "quay.io/trustyai/trustyai-garak-lls-provider-dsp:latest",
+                        "tagged image",
+                    ),
+                    Finding(
+                        "blocker",
+                        "src/llama_stack_provider_trustyai_garak/constants.py",
+                        6,
+                        "quay.io/trustyai/trustyai-garak-lls-provider-dsp:v1.2.3",
+                        "tagged image",
+                    ),
+                ],
+            )
+        ]
+        apply_exceptions(results, garak_exceptions, "llama-stack-provider-trustyai-garak")
+        assert results[0].findings[0].severity == "blocker"
+        assert results[0].findings[1].severity == "blocker"
+
+    def test_garak_sibling_image_not_matched(self, garak_exceptions):
+        results = [
+            RuleResult(
+                rule="image-manifest-complete",
+                passed=False,
+                findings=[
+                    Finding(
+                        "blocker",
+                        "src/llama_stack_provider_trustyai_garak/constants.py",
+                        6,
+                        "quay.io/trustyai/trustyai-garak-lls-provider-dsp-extra@sha256:" + "b" * 64,
+                        "hardcoded image",
+                    ),
+                ],
+            )
+        ]
+        apply_exceptions(results, garak_exceptions, "llama-stack-provider-trustyai-garak")
+        assert results[0].findings[0].severity == "blocker"
+
 
 # --- report sorting ---
 

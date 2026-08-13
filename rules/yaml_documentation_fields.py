@@ -234,7 +234,7 @@ def documentation_field_lines(yaml_text: str) -> set[int]:
             if isinstance(event, yaml.DocumentEndEvent):
                 finalize_document()
                 continue
-            if isinstance(event, (yaml.MappingStartEvent, yaml.SequenceStartEvent)):
+            if isinstance(event, yaml.MappingStartEvent | yaml.SequenceStartEvent):
                 stack.append(
                     _Frame(
                         kind="map" if isinstance(event, yaml.MappingStartEvent) else "seq",
@@ -244,11 +244,11 @@ def documentation_field_lines(yaml_text: str) -> set[int]:
                         in_schema_value=entering_schema_value(),
                     )
                 )
-            elif isinstance(event, (yaml.MappingEndEvent, yaml.SequenceEndEvent)):
+            elif isinstance(event, yaml.MappingEndEvent | yaml.SequenceEndEvent):
                 if stack:
                     stack.pop()
                 advance(is_doc_key=False, is_schema_value_key=False)
-            elif isinstance(event, (yaml.ScalarEvent, yaml.AliasEvent)):
+            elif isinstance(event, yaml.ScalarEvent | yaml.AliasEvent):
                 in_docs = effective_in_docs()
                 is_key = bool(stack) and stack[-1].kind == "map" and stack[-1].expect_key
                 chain = current_chain()

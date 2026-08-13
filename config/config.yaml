@@ -39,6 +39,7 @@ exceptions:
       - "**/testdata/**"
       - "**/testing/**"
       - "**/*e2e*/**"
+      - "**/mock/**"
       - "**/mocks/**"
       - "**/hack/**"
       - "**/fixture/**"
@@ -472,6 +473,13 @@ exceptions:
     reference: "https://issues.redhat.com/browse/RHOAIENG-69995"
     expires: "2027-07-07"
 
+  - rules: image-manifest-complete
+    repo: feast
+    paths:
+      - "infra/feast-operator/internal/controller/services/services_types.go"
+    message: "*RELATED_IMAGE_CRON_JOB*"
+    reason: "RELATED_IMAGE_CRON_JOB env var for feast-operator CronJob image — opendatahub-operator manifest wiring pending"
+
   # --- ogx-k8s-operator ---
   - rules:
       - image-manifest-complete
@@ -810,3 +818,12 @@ exceptions:
       - "dc-controller/.github/workflows/lint.yml"
       - "dc-controller/.github/workflows/test.yml"
     reason: "GitHub Actions workflow steps pinned to commit SHAs — CI infrastructure, not container images deployed in production"
+
+  # --- llama-stack-provider-trustyai-garak ---
+  - rules: image-manifest-complete
+    repo: llama-stack-provider-trustyai-garak
+    paths:
+      - "src/llama_stack_provider_trustyai_garak/constants.py"
+    images:
+      - "quay.io/trustyai/trustyai-garak-lls-provider-dsp@sha256:*"
+    reason: "Hardcoded digest-pinned DSP provider image — opendatahub-operator RELATED_IMAGE_* wiring pending for this component"
