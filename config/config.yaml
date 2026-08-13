@@ -771,13 +771,6 @@ exceptions:
       - "manifests/trainer/overlays/runtimes/**"
     reason: "Upstream Kubeflow community overlays — only used by the kubeflow-platform deployment path, not by RHOAI (operator uses manifests/trainer/rhoai/ directly)"
 
-  - rules: image-manifest-complete
-    repo: trainer-operator
-    paths:
-      - "internal/controller/params.go"
-    message: "*RELATED_IMAGE_ODH_TH06*"
-    reason: "RELATED_IMAGE env vars for TH06 (Torch 2.10) runtime images — opendatahub-operator manifest wiring pending"
-
   # --- data-connect-hub ---
   - rules: no-image-tags
     repo: data-connect-hub
