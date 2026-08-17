@@ -779,12 +779,10 @@ exceptions:
       - "dc-controller/cmd/**"
       - "dc-controller/internal/controller/**"
     images:
-      - "ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest"
-      - "ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest"
       - "quay.io/opendatahub/odh-data-connect-hub-rest:*"
       - "quay.io/opendatahub/odh-data-connect-hub-flight:*"
       - "quay.io/opendatahub/odh-kube-rbac-proxy:*"
-    reason: "Default fallback images — overridden at runtime via RELATED_IMAGE_* env vars, wired through params.env with digest-pinned images from Build-Config"
+    reason: "Default fallback images — overridden at runtime via RELATED_IMAGE_* env vars injected by opendatahub-operator from Build-Config digests"
 
   - rules: no-image-tags
     repo: data-connect-hub
@@ -792,8 +790,6 @@ exceptions:
       - "dc-controller/config/manager/**"
     images:
       - "controller:latest"
-      - "ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest"
-      - "ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest"
       - "quay.io/opendatahub/odh-data-connect-hub-controller:*"
     reason: "Kubebuilder scaffold defaults — controller image set by opendatahub-operator ModuleConfig.ControllerImage; RELATED_IMAGE env var values injected by opendatahub-operator from Build-Config digests at deployment time"
 
@@ -803,8 +799,6 @@ exceptions:
       - "config/base/*/deployment.yaml"
       - "config/overlays/**"
     images:
-      - "ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest"
-      - "ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest"
       - "quay.io/opendatahub/odh-data-connect-hub-rest:*"
       - "quay.io/opendatahub/odh-data-connect-hub-flight:*"
     reason: "Kustomize manifest placeholders — controller's reconcileService() injects kustomize Image overrides from RELATED_IMAGE_* env vars before rendering, replacing tags with digest-pinned images at runtime"
@@ -814,8 +808,6 @@ exceptions:
     paths:
       - "dc-controller/chart/**"
     images:
-      - "ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest"
-      - "ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest"
       - "quay.io/opendatahub/odh-data-connect-hub-rest:*"
       - "quay.io/opendatahub/odh-data-connect-hub-flight:*"
       - "quay.io/opendatahub/odh-kube-rbac-proxy:*"
