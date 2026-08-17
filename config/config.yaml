@@ -828,6 +828,20 @@ exceptions:
       - "dc-controller/.github/workflows/test.yml"
     reason: "GitHub Actions workflow steps pinned to commit SHAs — CI infrastructure, not container images deployed in production"
 
+  - rules: params-env-wiring
+    repo: data-connect-hub
+    paths:
+      - "config/base/**"
+      - "dc-controller/config/default/**"
+      - "dc-controller/config/manager/**"
+      - "dc-controller/chart/**"
+    images:
+      - "quay.io/opendatahub/odh-data-connect-hub-rest:*"
+      - "quay.io/opendatahub/odh-data-connect-hub-flight:*"
+      - "quay.io/opendatahub/odh-data-connect-hub-controller:*"
+      - "quay.io/opendatahub/odh-kube-rbac-proxy:*"
+    reason: "Images overridden at runtime via RELATED_IMAGE_* env vars injected by opendatahub-operator from Build-Config digests"
+
   # --- llama-stack-provider-trustyai-garak ---
   - rules: image-manifest-complete
     repo: llama-stack-provider-trustyai-garak
