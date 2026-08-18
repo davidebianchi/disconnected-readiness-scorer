@@ -816,6 +816,7 @@ exceptions:
     repo: data-connect-hub
     paths:
       - "dc-controller/chart/**"
+      - "dc-controller/charts/**"
     images:
       - "quay.io/opendatahub/odh-data-connect-hub-rest:*"
       - "quay.io/opendatahub/odh-data-connect-hub-flight:*"
