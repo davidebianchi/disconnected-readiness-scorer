@@ -19,6 +19,10 @@ known_non_image_prefixes:
 params_env_filenames:
   notebooks:
     - params-latest.env
+  # workbenches-operator fetches upstream notebook manifests (including params-latest.env)
+  # from opendatahub-io/notebooks via get_all_manifests.sh into opt/manifests/
+  workbenches-operator:
+    - params-latest.env
 
 exceptions:
 
@@ -224,6 +228,18 @@ exceptions:
     images:
       - "gcr.io/kubeflow-ci/notebook-controller"
     reason: "Upstream Skaffold build config — build-time artifact target, not a runtime image"
+    reference: "https://issues.redhat.com/browse/RHOAIENG-69990"
+
+  # --- workbenches-operator ---
+  - rules:
+      - image-manifest-complete
+      - no-image-tags
+    repo: workbenches-operator
+    paths:
+      - "opt/manifests/workbenches/odh-notebook-controller/development/ktunnel.yaml"
+    images:
+      - "quay.io/omrikiei/ktunnel:*"
+    reason: "Dev-only ktunnel webhook tunnel for local development — not deployed in production (same as kubeflow exception, fetched into opt/manifests)"
     reference: "https://issues.redhat.com/browse/RHOAIENG-69990"
 
   # --- notebooks ---
