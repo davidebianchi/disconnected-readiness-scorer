@@ -44,4 +44,5 @@ included_repositories:
   - opendatahub-io/trainer-operator
   - opendatahub-io/data-connect-hub
   - opendatahub-io/kale
+  - opendatahub-io/workbenches-operator
   # - opendatahub-io/opendatahub-tests
