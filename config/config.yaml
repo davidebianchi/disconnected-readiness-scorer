@@ -256,14 +256,14 @@ exceptions:
   # --- extensions ---
   - rules:
       - no-runtime-egress
-    repo: odh-kale
+    repo: kale
     paths:
       - "scripts/kfp-dev-setup.sh"
     reason: "kfp-dev-setup.sh is dev only - not in the container image - not deployed in production"
 
   - rules:
       - no-image-tags
-    repo: odh-kale
+    repo: kale
     paths:
       - "kale/common/katibutils.py"
     reason: "katib functionality is disabled in RHOAI - not customer facing"
