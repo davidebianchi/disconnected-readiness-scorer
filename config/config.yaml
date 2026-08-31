@@ -253,6 +253,21 @@ exceptions:
       - "scripts/**"
     reason: "Build-time utilities and CI scripts — not deployed in production"
 
+  # --- extensions ---
+  - rules:
+      - no-runtime-egress
+    repo: odh-kale
+    paths:
+      - "scripts/kfp-dev-setup.sh"
+    reason: "kfp-dev-setup.sh is dev only - not in the container image - not deployed in production"
+
+  - rules:
+      - no-image-tags
+    repo: odh-kale
+    paths:
+      - "kale/common/katibutils.py"
+    reason: "katib functionality is disabled in RHOAI - not customer facing"
+
   # --- kserve ---
   - rules: params-env-wiring
     repo: kserve
